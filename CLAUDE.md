@@ -110,7 +110,7 @@ The agent loop automatically feeds tool execution errors back to the LLM:
 2. **Status code errors**: `Dispatcher` checks `ResourceObject->code >= 400` → `ToolResult::error()` with `"{code}: {json_body}"` format
 3. **Unknown tools**: Tool not found in `ToolRegistry` → `ToolResult::error()` with `"Unknown tool: {name}"` format
 
-Error results are sent back to the LLM as `tool_result` messages with `is_error: true`, allowing the LLM to retry or respond appropriately. The constant `Dispatcher::ERROR_STATUS_THRESHOLD` (400) defines the threshold.
+Error results are sent back to the LLM as `tool_result` messages with `is_error: true`, allowing the LLM to retry or respond appropriately. The error status threshold (400) is defined as a private constant in `Dispatcher`.
 
 ## Notes
 
