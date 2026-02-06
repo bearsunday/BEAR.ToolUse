@@ -102,6 +102,16 @@ composer tests    # cs + sa + test
 array{type: string, properties: array<string, array<string, mixed>>, required: list<string>}
 ```
 
+## Error Feedback Loop
+
+The agent loop automatically feeds tool execution errors back to the LLM:
+
+1. **Exception errors**: `Dispatcher` catches all `Throwable` → `ToolResult::error()` with `"{ExceptionClass}: {message}"` format
+2. **Status code errors**: `Dispatcher` checks `ResourceObject->code >= 400` → `ToolResult::error()` with `"{code}: {json_body}"` format
+3. **Unknown tools**: Tool not found in `ToolRegistry` → `ToolResult::error()` with `"Unknown tool: {name}"` format
+
+Error results are sent back to the LLM as `tool_result` messages with `is_error: true`, allowing the LLM to retry or respond appropriately. The constant `Dispatcher::ERROR_STATUS_THRESHOLD` (400) defines the threshold.
+
 ## Notes
 
 ### Parameter Description Resolution Priority

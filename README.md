@@ -302,6 +302,30 @@ When multiple sources provide descriptions, they are resolved in this order:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Error Feedback Loop
+
+When a tool execution fails, the error is automatically fed back to the LLM, which can then retry with corrected parameters or take alternative action. This works for both exception-based errors and non-2xx status codes.
+
+```
+User: "Delete user 999"
+  ↓
+LLM: tool_use → user_delete(id: 999)
+  ↓
+Dispatcher: 404 Not Found → ToolResult(isError: true)
+  ↓
+LLM receives error, decides next action
+  ↓
+LLM: "User 999 was not found."
+```
+
+Errors detected by the Dispatcher:
+
+| Error Type | Example | Error Message Format |
+|------------|---------|---------------------|
+| Exception | `ResourceNotFoundException` | `BEAR\Resource\Exception\ResourceNotFoundException: /user?id=999` |
+| Status code | `$this->code = 400` | `400: {"error":"Validation failed"}` |
+| Unknown tool | Tool not registered | `Unknown tool: foo_bar` |
+
 ## API
 
 ### Interfaces

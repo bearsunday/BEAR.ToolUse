@@ -302,6 +302,30 @@ ALPSプロファイルの`semantic`記述子から`title`または`doc.value`が
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## エラーフィードバックループ
+
+ツール実行が失敗した場合、エラーは自動的にLLMにフィードバックされ、LLMはパラメータを修正して再試行したり、別のアクションを取ることができます。例外ベースのエラーと非2xxステータスコードの両方に対応しています。
+
+```
+ユーザー: 「ユーザー999を削除して」
+  ↓
+LLM: tool_use → user_delete(id: 999)
+  ↓
+Dispatcher: 404 Not Found → ToolResult(isError: true)
+  ↓
+LLMがエラーを受信し、次のアクションを決定
+  ↓
+LLM: 「ユーザー999は見つかりませんでした。」
+```
+
+Dispatcherが検出するエラー:
+
+| エラー種別 | 例 | エラーメッセージ形式 |
+|-----------|---|-------------------|
+| 例外 | `ResourceNotFoundException` | `BEAR\Resource\Exception\ResourceNotFoundException: /user?id=999` |
+| ステータスコード | `$this->code = 400` | `400: {"error":"Validation failed"}` |
+| 未知のツール | 未登録のツール | `Unknown tool: foo_bar` |
+
 ## API
 
 ### インターフェイス
