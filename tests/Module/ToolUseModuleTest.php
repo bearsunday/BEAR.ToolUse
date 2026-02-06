@@ -13,12 +13,12 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 
-#[CoversClass(AgentModule::class)]
-final class AgentModuleTest extends TestCase
+#[CoversClass(ToolUseModule::class)]
+final class ToolUseModuleTest extends TestCase
 {
     public function testBindings(): void
     {
-        $injector = new Injector(new AgentModule('app', new ResourceModule('BEAR\ToolUse\Fake')));
+        $injector = new Injector(new ToolUseModule('app', new ResourceModule('BEAR\ToolUse\Fake')));
 
         $this->assertInstanceOf(
             ToolRegistryInterface::class,
@@ -40,7 +40,7 @@ final class AgentModuleTest extends TestCase
 
     public function testRegistrySingleton(): void
     {
-        $injector = new Injector(new AgentModule('app', new ResourceModule('BEAR\ToolUse\Fake')));
+        $injector = new Injector(new ToolUseModule('app', new ResourceModule('BEAR\ToolUse\Fake')));
 
         $registry1 = $injector->getInstance(ToolRegistryInterface::class);
         $registry2 = $injector->getInstance(ToolRegistryInterface::class);
@@ -50,7 +50,7 @@ final class AgentModuleTest extends TestCase
 
     public function testCustomScheme(): void
     {
-        $injector = new Injector(new AgentModule('page', new ResourceModule('BEAR\ToolUse\Fake')));
+        $injector = new Injector(new ToolUseModule('page', new ResourceModule('BEAR\ToolUse\Fake')));
 
         $dispatcher = $injector->getInstance(DispatcherInterface::class);
         $this->assertInstanceOf(DispatcherInterface::class, $dispatcher);

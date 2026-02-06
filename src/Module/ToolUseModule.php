@@ -24,7 +24,7 @@ use Ray\Di\Scope;
  * Note: LlmClientInterface must be bound by the application.
  * This module does not provide a default LLM implementation.
  */
-final class AgentModule extends AbstractModule
+final class ToolUseModule extends AbstractModule
 {
     public function __construct(
         private readonly string $scheme = 'app',
