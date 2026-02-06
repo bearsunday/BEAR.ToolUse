@@ -47,17 +47,14 @@ final readonly class ParameterDescriptionResolver implements ParameterDescriptio
         return $this->getPhpDocDescription($param, $paramName);
     }
 
-    /** @param array<string, mixed>|null $jsonSchema */
+    /** @param array<string, array{description?: string}>|null $jsonSchema */
     private function getJsonSchemaDescription(string $paramName, array|null $jsonSchema): string|null
     {
         if ($jsonSchema === null || ! isset($jsonSchema[$paramName]['description'])) {
             return null;
         }
 
-        /** @var string $description */
-        $description = $jsonSchema[$paramName]['description'];
-
-        return $description;
+        return $jsonSchema[$paramName]['description'];
     }
 
     private function getAlpsDictionaryDescription(string $paramName): string|null

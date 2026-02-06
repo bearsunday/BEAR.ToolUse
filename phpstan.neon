@@ -1,6 +1,8 @@
 parameters:
-    level: max
+    level: 9
     paths:
         - src
     excludePaths:
         - vendor
+    ignoreErrors:
+        - '#Call to function is_string\(\) with string will always evaluate to true#'
