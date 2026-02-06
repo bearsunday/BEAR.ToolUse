@@ -95,7 +95,7 @@ final class MyLlmClient implements LlmClientInterface
 namespace MyApp\Module;
 
 use BEAR\ToolUse\Llm\LlmClientInterface;
-use BEAR\ToolUse\Module\AgentModule;
+use BEAR\ToolUse\Module\ToolUseModule;
 use MyApp\Llm\MyLlmClient;
 use Ray\Di\AbstractModule;
 
@@ -103,7 +103,7 @@ final class AppModule extends AbstractModule
 {
     protected function configure(): void
     {
-        $this->install(new AgentModule());
+        $this->install(new ToolUseModule());
         $this->bind(LlmClientInterface::class)->to(MyLlmClient::class);
     }
 }

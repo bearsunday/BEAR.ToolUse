@@ -36,7 +36,7 @@ src/
 │   ├── LlmClientInterface.php  # User implementation
 │   └── LlmResponse.php
 └── Module/
-    └── AgentModule.php  # Ray.Di module
+    └── ToolUseModule.php  # Ray.Di module
 ```
 
 ## Commands
