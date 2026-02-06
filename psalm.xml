@@ -33,11 +33,5 @@
             </errorLevel>
         </MixedAssignment>
 
-        <!-- ALPS SDK type quirks -->
-        <RedundantCondition>
-            <errorLevel type="suppress">
-                <file name="src/Schema/AlpsSemanticDictionary.php"/>
-            </errorLevel>
-        </RedundantCondition>
     </issueHandlers>
 </psalm>

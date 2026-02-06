@@ -9,7 +9,6 @@ use Koriym\AppStateDiagram\Profile;
 use Koriym\AppStateDiagram\SemanticDescriptor;
 
 use function is_string;
-use function property_exists;
 
 /**
  * ALPS semantic dictionary for description enrichment
@@ -39,12 +38,12 @@ final class AlpsSemanticDictionary extends ArrayObject
 
     private function extractDescription(SemanticDescriptor $descriptor): string|null
     {
-        if (property_exists($descriptor, 'title') && is_string($descriptor->title) && $descriptor->title !== '') {
+        if ($descriptor->title !== '') {
             return $descriptor->title;
         }
 
         // koriym/app-state-diagram extracts doc.value and stores it as a string
-        if (property_exists($descriptor, 'doc') && is_string($descriptor->doc) && $descriptor->doc !== '') {
+        if (is_string($descriptor->doc) && $descriptor->doc !== '') {
             return $descriptor->doc;
         }
 

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Schema;
 
 use BEAR\Resource\FactoryInterface;
-use BEAR\Resource\ResourceObject;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use Override;
 
@@ -60,7 +59,6 @@ final readonly class ToolCollector implements ToolCollectorInterface
         $resourceClass = $ro::class;
         $resourcePath = $this->extractPath($uri);
 
-        /** @var class-string<ResourceObject> $resourceClass */
         $tools = $this->converter->convert($resourceClass, $resourcePath);
 
         foreach ($tools as $tool) {
