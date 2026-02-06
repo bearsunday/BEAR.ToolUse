@@ -10,6 +10,8 @@ use phpDocumentor\Reflection\DocBlockFactoryInterface;
 use ReflectionMethod;
 use ReflectionParameter;
 
+use function is_array;
+use function is_string;
 use function lcfirst;
 use function str_replace;
 use function ucwords;
@@ -47,14 +49,19 @@ final readonly class ParameterDescriptionResolver implements ParameterDescriptio
         return $this->getPhpDocDescription($param, $paramName);
     }
 
-    /** @param array<string, array{description?: string}>|null $jsonSchema */
+    /** @param array<string, mixed>|null $jsonSchema */
     private function getJsonSchemaDescription(string $paramName, array|null $jsonSchema): string|null
     {
-        if ($jsonSchema === null || ! isset($jsonSchema[$paramName]['description'])) {
+        if ($jsonSchema === null) {
             return null;
         }
 
-        return $jsonSchema[$paramName]['description'];
+        $paramSchema = $jsonSchema[$paramName] ?? null;
+        if (! is_array($paramSchema) || ! isset($paramSchema['description']) || ! is_string($paramSchema['description'])) {
+            return null;
+        }
+
+        return $paramSchema['description'];
     }
 
     private function getAlpsDictionaryDescription(string $paramName): string|null

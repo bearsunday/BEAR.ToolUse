@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Schema;
 
 use BEAR\Resource\FactoryInterface;
-use BEAR\Resource\ResourceObject;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use Override;
 
