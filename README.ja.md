@@ -200,19 +200,16 @@ BEAR.ResourceのJSON Schemaを使用してパラメータ定義を強化でき�
 ### 1. JsonSchemaModuleと共にインストール
 
 ```php
-use BEAR\Resource\Module\JsonSchemaModule as ResourceJsonSchemaModule;
-use BEAR\Resource\Module\ResourceModule;
+use BEAR\Resource\Module\JsonSchemaModule;
 use BEAR\ToolUse\Module\ToolUseModule;
 
 $this->install(
-    new ToolUseModule(
-        new ResourceJsonSchemaModule(
-            '',                    // json_schema_dir（レスポンス用）
-            '/path/to/validate',   // json_validate_dir（入力パラメータ用）
-            new ResourceModule('MyApp'),
-        ),
+    new JsonSchemaModule(
+        $this->appMeta->appDir . '/var/json_schema',
+        $this->appMeta->appDir . '/var/json_validate',
     ),
 );
+$this->install(new ToolUseModule());
 ```
 
 ### 2. JSON Schemaの定義
@@ -283,23 +280,20 @@ ALPSプロファイルの`semantic`記述子から`title`または`doc.value`が
 
 ## アーキテクチャ
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Agent                                 │
-│  ┌─────────────┐    ┌──────────────┐    ┌───────────────┐  │
-│  │ LlmClient   │───▶│   Message    │───▶│  Dispatcher   │  │
-│  │ (Interface) │    │   Loop       │    │               │  │
-│  └─────────────┘    └──────────────┘    └───────┬───────┘  │
-│                                                  │          │
-│  ┌─────────────────────────────────────────────┐│          │
-│  │              ToolRegistry                    ││          │
-│  │  tool_name → {resourceUri, method}          ││          │
-│  └─────────────────────────────────────────────┘│          │
-│                                                  ▼          │
-│                                         ┌───────────────┐  │
-│                                         │ BEAR.Resource │  │
-│                                         └───────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Agent
+        LlmClient["LlmClient<br/>(Interface)"]
+        MessageLoop["Message<br/>Loop"]
+        Dispatcher
+        ToolRegistry["ToolRegistry<br/>tool_name → {resourceUri, method}"]
+        Resource["BEAR.Resource"]
+
+        LlmClient --> MessageLoop
+        MessageLoop --> Dispatcher
+        Dispatcher --> ToolRegistry
+        ToolRegistry --> Resource
+    end
 ```
 
 ## エラーフィードバックループ
