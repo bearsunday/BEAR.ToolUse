@@ -39,7 +39,7 @@ final class DispatcherTest extends TestCase
 
     public function testDispatchGet(): void
     {
-        $this->registry->register('crud_get', 'crud', 'get');
+        $this->registry->register('crud_get', 'app://self/crud', 'get');
         $toolCall = new ToolCall('call_get', 'crud_get', ['id' => 1]);
 
         $result = $this->dispatcher->dispatch($toolCall);
@@ -51,7 +51,7 @@ final class DispatcherTest extends TestCase
 
     public function testDispatchPost(): void
     {
-        $this->registry->register('crud_post', 'crud', 'post');
+        $this->registry->register('crud_post', 'app://self/crud', 'post');
         $toolCall = new ToolCall('call_post', 'crud_post', ['name' => 'test']);
 
         $result = $this->dispatcher->dispatch($toolCall);
@@ -62,7 +62,7 @@ final class DispatcherTest extends TestCase
 
     public function testDispatchPut(): void
     {
-        $this->registry->register('crud_put', 'crud', 'put');
+        $this->registry->register('crud_put', 'app://self/crud', 'put');
         $toolCall = new ToolCall('call_put', 'crud_put', ['id' => 1, 'name' => 'updated']);
 
         $result = $this->dispatcher->dispatch($toolCall);
@@ -73,7 +73,7 @@ final class DispatcherTest extends TestCase
 
     public function testDispatchPatch(): void
     {
-        $this->registry->register('crud_patch', 'crud', 'patch');
+        $this->registry->register('crud_patch', 'app://self/crud', 'patch');
         $toolCall = new ToolCall('call_patch', 'crud_patch', ['id' => 1, 'name' => 'patched']);
 
         $result = $this->dispatcher->dispatch($toolCall);
@@ -84,7 +84,7 @@ final class DispatcherTest extends TestCase
 
     public function testDispatchDelete(): void
     {
-        $this->registry->register('crud_delete', 'crud', 'delete');
+        $this->registry->register('crud_delete', 'app://self/crud', 'delete');
         $toolCall = new ToolCall('call_delete', 'crud_delete', ['id' => 1]);
 
         $result = $this->dispatcher->dispatch($toolCall);
@@ -95,7 +95,7 @@ final class DispatcherTest extends TestCase
 
     public function testDispatchDefaultMethod(): void
     {
-        $this->registry->register('crud_unknown', 'crud', 'unknown');
+        $this->registry->register('crud_unknown', 'app://self/crud', 'unknown');
         $toolCall = new ToolCall('call_unknown', 'crud_unknown', ['id' => 1]);
 
         $result = $this->dispatcher->dispatch($toolCall);
@@ -107,7 +107,7 @@ final class DispatcherTest extends TestCase
 
     public function testDispatchWithException(): void
     {
-        $this->registry->register('error_get', 'error', 'get');
+        $this->registry->register('error_get', 'app://self/error', 'get');
         $toolCall = new ToolCall('call_error', 'error_get', []);
 
         $result = $this->dispatcher->dispatch($toolCall);
@@ -156,5 +156,15 @@ final class DispatcherTest extends TestCase
         $this->assertTrue($result->isError);
         $this->assertSame('call_123', $result->toolUseId);
         $this->assertSame('Something went wrong', $result->content);
+    }
+
+    public function testDispatchWithDifferentScheme(): void
+    {
+        $this->registry->register('page_article_get', 'page://self/article', 'get');
+        $toolCall = new ToolCall('call_page', 'page_article_get', ['id' => 1]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertFalse($result->isError);
     }
 }

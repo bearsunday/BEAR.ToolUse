@@ -15,7 +15,7 @@ interface ToolRegistryInterface
      * Register a tool mapping
      *
      * @param string $toolName    Tool name (e.g., "article_get")
-     * @param string $resourceUri Resource URI without scheme (e.g., "article")
+     * @param string $resourceUri Resource URI (e.g., "app://self/article" or "article")
      * @param string $method      HTTP method (e.g., "get")
      */
     public function register(string $toolName, string $resourceUri, string $method): void;

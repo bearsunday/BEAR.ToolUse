@@ -25,7 +25,6 @@ final readonly class Dispatcher implements DispatcherInterface
     public function __construct(
         private ResourceInterface $resource,
         private ToolRegistryInterface $registry,
-        private string $scheme = 'app',
     ) {
     }
 
@@ -60,16 +59,15 @@ final readonly class Dispatcher implements DispatcherInterface
     private function executeResource(string $uri, string $method, array $input): string
     {
         $httpMethod = strtoupper($method);
-        $fullUri = $this->scheme . '://self/' . $uri;
 
         /** @var ResourceObject $ro */
         $ro = match ($httpMethod) {
-            'GET' => $this->resource->get($fullUri, $input),
-            'POST' => $this->resource->post($fullUri, $input),
-            'PUT' => $this->resource->put($fullUri, $input),
-            'PATCH' => $this->resource->patch($fullUri, $input),
-            'DELETE' => $this->resource->delete($fullUri, $input),
-            default => $this->resource->get($fullUri, $input),
+            'GET' => $this->resource->get($uri, $input),
+            'POST' => $this->resource->post($uri, $input),
+            'PUT' => $this->resource->put($uri, $input),
+            'PATCH' => $this->resource->patch($uri, $input),
+            'DELETE' => $this->resource->delete($uri, $input),
+            default => $this->resource->get($uri, $input),
         };
 
         return json_encode($ro->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

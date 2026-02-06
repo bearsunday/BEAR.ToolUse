@@ -4,28 +4,17 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Schema;
 
-use BEAR\Resource\ResourceObject;
-
 /**
- * Collects tools from resource classes
+ * Collects tools from resource URIs
  */
 interface ToolCollectorInterface
 {
     /**
-     * Collect tools from a resource class
+     * Collect tools from resource URIs
      *
-     * @param class-string<ResourceObject> $resourceClass
-     *
-     * @return list<Tool>
-     */
-    public function collect(string $resourceClass, string $resourcePath): array;
-
-    /**
-     * Collect tools from multiple resource classes
-     *
-     * @param array<class-string<ResourceObject>, string> $resources Map of class => path
+     * @param list<string> $uris List of full resource URIs (e.g., ["app://self/user", "app://self/article"])
      *
      * @return list<Tool>
      */
-    public function collectAll(array $resources): array;
+    public function collect(array $uris): array;
 }

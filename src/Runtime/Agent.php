@@ -18,7 +18,7 @@ use Override;
 final class Agent implements AgentInterface
 {
     /** @var list<Message> */
-    private array $messages = [];
+    public array $messages = [];
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -86,12 +86,5 @@ final class Agent implements AgentInterface
     public function reset(): void
     {
         $this->messages = [];
-    }
-
-    /** @return list<Message> */
-    #[Override]
-    public function getMessages(): array
-    {
-        return $this->messages;
     }
 }

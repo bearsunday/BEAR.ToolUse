@@ -8,6 +8,10 @@ use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
+use BEAR\ToolUse\Schema\JsonSchemaRepository;
+use BEAR\ToolUse\Schema\JsonSchemaRepositoryInterface;
+use BEAR\ToolUse\Schema\ParameterDescriptionResolver;
+use BEAR\ToolUse\Schema\ParameterDescriptionResolverInterface;
 use BEAR\ToolUse\Schema\SchemaConverter;
 use BEAR\ToolUse\Schema\SchemaConverterInterface;
 use BEAR\ToolUse\Schema\ToolCollector;
@@ -23,16 +27,15 @@ use Ray\Di\Scope;
  *
  * Note: LlmClientInterface must be bound by the application.
  * This module does not provide a default LLM implementation.
+ *
+ * BEAR.Resource's FactoryInterface is expected to be bound by the application
+ * via BEAR.Sunday's ResourceModule.
+ *
+ * For JSON Schema support, install BEAR\Resource\Module\JsonSchemaModule
+ * which provides the 'json_validate_dir' binding.
  */
 final class ToolUseModule extends AbstractModule
 {
-    public function __construct(
-        private readonly string $scheme = 'app',
-        AbstractModule|null $module = null,
-    ) {
-        parent::__construct($module);
-    }
-
     #[Override]
     protected function configure(): void
     {
@@ -42,6 +45,9 @@ final class ToolUseModule extends AbstractModule
         // Tool Registry (singleton to share across components)
         $this->bind(ToolRegistryInterface::class)->to(ToolRegistry::class)->in(Scope::SINGLETON);
 
+        // Parameter Description Resolver
+        $this->bind(ParameterDescriptionResolverInterface::class)->to(ParameterDescriptionResolver::class);
+
         // Schema Converter
         $this->bind(SchemaConverterInterface::class)->to(SchemaConverter::class);
 
@@ -49,11 +55,13 @@ final class ToolUseModule extends AbstractModule
         $this->bind(ToolCollectorInterface::class)->to(ToolCollector::class);
 
         // Dispatcher
-        $this->bind(DispatcherInterface::class)
+        $this->bind(DispatcherInterface::class)->to(Dispatcher::class);
+
+        // JSON Schema Repository (optional - requires json_validate_dir binding)
+        $this->bind(JsonSchemaRepositoryInterface::class)
             ->toConstructor(
-                Dispatcher::class,
-                ['scheme' => 'dispatcher_scheme'],
+                JsonSchemaRepository::class,
+                ['validateDir' => 'json_validate_dir'],
             );
-        $this->bind()->annotatedWith('dispatcher_scheme')->toInstance($this->scheme);
     }
 }

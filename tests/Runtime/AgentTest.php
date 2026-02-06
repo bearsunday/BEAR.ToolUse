@@ -169,11 +169,41 @@ final class AgentTest extends TestCase
         $this->llmClient->queueTextResponse('First response');
         $this->agent->run('First message');
 
-        $this->assertNotEmpty($this->agent->getMessages());
+        $this->assertNotEmpty($this->agent->messages);
 
         $this->agent->reset();
 
-        $this->assertEmpty($this->agent->getMessages());
+        $this->assertEmpty($this->agent->messages);
+    }
+
+    public function testMessagesProperty(): void
+    {
+        $history = [
+            Message::user('Previous question'),
+            Message::assistant([['type' => 'text', 'text' => 'Previous answer']]),
+        ];
+
+        $this->agent->messages = $history;
+
+        $this->assertCount(2, $this->agent->messages);
+        $this->assertSame('user', $this->agent->messages[0]->role);
+        $this->assertSame('assistant', $this->agent->messages[1]->role);
+    }
+
+    public function testRestoreMessagesAndContinue(): void
+    {
+        $history = [
+            Message::user('Previous question'),
+            Message::assistant([['type' => 'text', 'text' => 'Previous answer']]),
+        ];
+
+        $this->agent->messages = $history;
+        $this->llmClient->queueTextResponse('Continued response');
+
+        $response = $this->agent->run('Follow up question');
+
+        $this->assertTrue($response->completed);
+        $this->assertCount(3, $this->agent->messages); // 2 history + 1 new user
     }
 
     public function testAgentResponseCompleted(): void

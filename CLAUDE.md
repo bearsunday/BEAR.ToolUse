@@ -11,7 +11,8 @@ A library that enables AI agent capabilities for BEAR.Sunday applications. Autom
 ```
 src/
 ├── Attribute/           # PHP Attributes
-│   └── Tool.php         # Tool exposure control
+│   ├── Tool.php         # Tool metadata (name, description)
+│   └── Exclude.php      # Exclude from tool exposure
 ├── Dispatch/            # Tool execution
 │   ├── DispatcherInterface.php
 │   ├── Dispatcher.php   # Dispatch to BEAR.Resource
@@ -25,7 +26,11 @@ src/
 │   ├── ToolCollectorInterface.php
 │   ├── ToolCollector.php      # Tool collection & registration
 │   ├── Tool.php               # Tool definition class
-│   └── AlpsSemanticDictionary.php  # ALPS dictionary
+│   ├── AlpsSemanticDictionary.php      # ALPS dictionary
+│   ├── JsonSchemaRepositoryInterface.php
+│   ├── JsonSchemaRepository.php        # JSON Schema loader
+│   ├── ParameterDescriptionResolverInterface.php
+│   └── ParameterDescriptionResolver.php # Description resolver
 ├── Runtime/             # Agent execution
 │   ├── AgentInterface.php
 │   ├── Agent.php        # Agent loop
@@ -36,7 +41,7 @@ src/
 │   ├── LlmClientInterface.php  # User implementation
 │   └── LlmResponse.php
 └── Module/
-    └── ToolUseModule.php  # Ray.Di module
+    └── ToolUseModule.php    # Ray.Di module
 ```
 
 ## Commands
@@ -61,9 +66,10 @@ composer tests    # cs + sa + test
 
 ### BEAR.Sunday Integration
 
-- Expose resource classes as tools
-- Access resources via `app://` scheme
-- Control exposure with `#[Tool]` attribute
+- Expose resource classes as tools via full URI (`app://self/user`, `page://self/article`)
+- `#[Tool]` attribute for metadata customization (name, description)
+- `#[Exclude]` attribute to exclude methods/classes from tool exposure (opt-out)
+- Supports BEAR\Resource\Annotation\JsonSchema for parameter validation
 
 ### Type Safety
 
@@ -98,6 +104,18 @@ array{type: string, properties: array<string, array<string, mixed>>, required: l
 
 ## Notes
 
-- Uses `koriym/app-state-diagram` Profile API
+### Parameter Description Resolution Priority
+
+1. JSON Schema (`#[JsonSchema(params: '...')]` from BEAR.Resource)
+2. ALPS dictionary (`koriym/app-state-diagram` Profile API)
+3. PHPDoc `@param` via reflection
+
+### JSON Schema Integration
+
+- Uses `BEAR\Resource\Annotation\JsonSchema` attribute
+- Reads from `json_validate_dir` (input parameter schemas)
+- Extracts: description, enum, format, minimum/maximum, minLength/maxLength, pattern
+
+### ALPS Integration
+
 - Extracts `title`/`doc->value` from ALPS `SemanticDescriptor`
-- Retrieves parameter descriptions from PHPDoc `@param` via reflection

@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Fake\Resource\App;
 
 use BEAR\Resource\ResourceObject;
-use BEAR\ToolUse\Attribute\Exclude;
 
-#[Exclude]
-class FakeHiddenClassResource extends ResourceObject
+class FakeEmptyDocResource extends ResourceObject
 {
-    public function onGet(): static
+    /**
+     * @param int $id
+     */
+    public function onGet(int $id): static
     {
         return $this;
     }

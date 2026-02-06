@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Module;
 
+use BEAR\Resource\Module\JsonSchemaModule as ResourceJsonSchemaModule;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
+use BEAR\ToolUse\Schema\JsonSchemaRepositoryInterface;
 use BEAR\ToolUse\Schema\SchemaConverterInterface;
 use BEAR\ToolUse\Schema\ToolCollectorInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -18,7 +20,7 @@ final class ToolUseModuleTest extends TestCase
 {
     public function testBindings(): void
     {
-        $injector = new Injector(new ToolUseModule('app', new ResourceModule('BEAR\ToolUse\Fake')));
+        $injector = new Injector(new ToolUseModule(new ResourceModule('BEAR\ToolUse\Fake')));
 
         $this->assertInstanceOf(
             ToolRegistryInterface::class,
@@ -40,7 +42,7 @@ final class ToolUseModuleTest extends TestCase
 
     public function testRegistrySingleton(): void
     {
-        $injector = new Injector(new ToolUseModule('app', new ResourceModule('BEAR\ToolUse\Fake')));
+        $injector = new Injector(new ToolUseModule(new ResourceModule('BEAR\ToolUse\Fake')));
 
         $registry1 = $injector->getInstance(ToolRegistryInterface::class);
         $registry2 = $injector->getInstance(ToolRegistryInterface::class);
@@ -48,11 +50,22 @@ final class ToolUseModuleTest extends TestCase
         $this->assertSame($registry1, $registry2);
     }
 
-    public function testCustomScheme(): void
+    public function testWithJsonSchemaSupport(): void
     {
-        $injector = new Injector(new ToolUseModule('page', new ResourceModule('BEAR\ToolUse\Fake')));
+        // Uses BEAR\Resource\Module\JsonSchemaModule for 'json_validate_dir' binding
+        $injector = new Injector(
+            new ToolUseModule(
+                new ResourceJsonSchemaModule(
+                    '',  // json_schema_dir (for response)
+                    __DIR__ . '/../Fake/json_schema',  // json_validate_dir (for input params)
+                    new ResourceModule('BEAR\ToolUse\Fake'),
+                ),
+            ),
+        );
 
-        $dispatcher = $injector->getInstance(DispatcherInterface::class);
-        $this->assertInstanceOf(DispatcherInterface::class, $dispatcher);
+        $this->assertInstanceOf(
+            JsonSchemaRepositoryInterface::class,
+            $injector->getInstance(JsonSchemaRepositoryInterface::class),
+        );
     }
 }

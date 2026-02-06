@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Schema;
 
 use BEAR\Resource\ResourceObject;
+use BEAR\ToolUse\Attribute\Exclude;
 use BEAR\ToolUse\Attribute\Tool as ToolAttribute;
 use Override;
-use phpDocumentor\Reflection\DocBlock\Tags\Param;
 use phpDocumentor\Reflection\DocBlockFactoryInterface;
 use ReflectionClass;
 use ReflectionMethod;
@@ -16,11 +16,9 @@ use ReflectionParameter;
 use ReflectionType;
 use ReflectionUnionType;
 
-use function lcfirst;
 use function str_replace;
 use function strtolower;
 use function trim;
-use function ucwords;
 
 /**
  * Converts resource classes to Tool definitions
@@ -30,8 +28,9 @@ final readonly class SchemaConverter implements SchemaConverterInterface
     private const HTTP_METHODS = ['onGet', 'onPost', 'onPut', 'onPatch', 'onDelete'];
 
     public function __construct(
-        private readonly DocBlockFactoryInterface $docBlockFactory,
-        private readonly AlpsSemanticDictionary|null $dictionary = null,
+        private DocBlockFactoryInterface $docBlockFactory,
+        private ParameterDescriptionResolverInterface|null $descriptionResolver = null,
+        private JsonSchemaRepositoryInterface|null $jsonSchemaRepository = null,
     ) {
     }
 
@@ -46,12 +45,12 @@ final readonly class SchemaConverter implements SchemaConverterInterface
     public function convert(string $resourceClass, string $resourcePath): array
     {
         $reflection = new ReflectionClass($resourceClass);
-        $classAttribute = $this->getToolAttribute($reflection);
 
-        if ($classAttribute !== null && ! $classAttribute->expose) {
+        if ($this->hasExcludeAttribute($reflection)) {
             return [];
         }
 
+        $classAttribute = $this->getToolAttribute($reflection);
         $tools = [];
         foreach (self::HTTP_METHODS as $methodName) {
             if (! $reflection->hasMethod($methodName)) {
@@ -59,20 +58,22 @@ final readonly class SchemaConverter implements SchemaConverterInterface
             }
 
             $method = $reflection->getMethod($methodName);
-            $methodAttribute = $this->getMethodToolAttribute($method);
 
-            if ($methodAttribute !== null && ! $methodAttribute->expose) {
+            if ($this->hasMethodExcludeAttribute($method)) {
                 continue;
             }
 
-            $tool = $this->createTool($resourcePath, $method, $classAttribute, $methodAttribute);
+            $methodAttribute = $this->getMethodToolAttribute($method);
+            $tool = $this->createTool($resourceClass, $resourcePath, $method, $classAttribute, $methodAttribute);
             $tools[] = $tool;
         }
 
         return $tools;
     }
 
+    /** @param class-string $resourceClass */
     private function createTool(
+        string $resourceClass,
         string $resourcePath,
         ReflectionMethod $method,
         ToolAttribute|null $classAttribute,
@@ -81,7 +82,11 @@ final readonly class SchemaConverter implements SchemaConverterInterface
         $httpMethod = strtolower(str_replace('on', '', $method->getName()));
         $name = $this->buildToolName($resourcePath, $httpMethod, $methodAttribute);
         $description = $this->buildDescription($method, $classAttribute, $methodAttribute);
-        $inputSchema = $this->buildInputSchema($method);
+
+        // Load JSON Schema for this method if available
+        $jsonSchema = $this->jsonSchemaRepository?->getParameterSchema($resourceClass, $method->getName());
+
+        $inputSchema = $this->buildInputSchema($method, $jsonSchema);
 
         return new Tool($name, $description, $inputSchema);
     }
@@ -114,25 +119,27 @@ final readonly class SchemaConverter implements SchemaConverterInterface
         }
 
         $docComment = $method->getDocComment();
-        if ($docComment !== false) {
-            $docBlock = $this->docBlockFactory->create($docComment);
-            $summary = $docBlock->getSummary();
-            if ($summary !== '') {
-                return $summary;
-            }
+        if ($docComment === false) {
+            return '';
         }
 
-        return '';
+        $summary = $this->docBlockFactory->create($docComment)->getSummary();
+
+        return $summary !== '' ? $summary : '';
     }
 
-    /** @return array{type: string, properties: array<string, array<string, mixed>>, required: list<string>} */
-    private function buildInputSchema(ReflectionMethod $method): array
+    /**
+     * @param array<string, mixed>|null $jsonSchema
+     *
+     * @return array{type: string, properties: array<string, array<string, mixed>>, required: list<string>}
+     */
+    private function buildInputSchema(ReflectionMethod $method, array|null $jsonSchema): array
     {
         $properties = [];
         $required = [];
 
         foreach ($method->getParameters() as $param) {
-            $paramSchema = $this->buildParameterSchema($param);
+            $paramSchema = $this->buildParameterSchema($param, $jsonSchema);
             $properties[$param->getName()] = $paramSchema;
 
             if ($param->isDefaultValueAvailable()) {
@@ -149,14 +156,69 @@ final readonly class SchemaConverter implements SchemaConverterInterface
         ];
     }
 
-    /** @return array<string, mixed> */
-    private function buildParameterSchema(ReflectionParameter $param): array
+    /**
+     * @param array<string, mixed>|null $jsonSchema
+     *
+     * @return array<string, mixed>
+     */
+    private function buildParameterSchema(ReflectionParameter $param, array|null $jsonSchema): array
     {
         $schema = $this->buildTypeSchema($param->getType());
+        $paramName = $param->getName();
 
-        $description = $this->getParameterDescription($param);
-        if ($description !== null) {
-            $schema['description'] = $description;
+        // Merge JSON Schema properties if available
+        $schema = $this->mergeJsonSchemaProperties($schema, $paramName, $jsonSchema);
+
+        // Add description if not already set by JSON Schema
+        if (! isset($schema['description']) && $this->descriptionResolver !== null) {
+            $description = $this->descriptionResolver->resolve($param, $jsonSchema);
+            if ($description !== null) {
+                $schema['description'] = $description;
+            }
+        }
+
+        return $schema;
+    }
+
+    /**
+     * Merge additional properties from JSON Schema
+     *
+     * @param array<string, mixed>      $schema     Current schema
+     * @param string                    $paramName  Parameter name
+     * @param array<string, mixed>|null $jsonSchema JSON Schema properties
+     *
+     * @return array<string, mixed>
+     */
+    private function mergeJsonSchemaProperties(array $schema, string $paramName, array|null $jsonSchema): array
+    {
+        if ($jsonSchema === null || ! isset($jsonSchema[$paramName])) {
+            return $schema;
+        }
+
+        /** @var array<string, mixed> $jsonSchemaProps */
+        $jsonSchemaProps = $jsonSchema[$paramName];
+
+        $keysToMerge = [
+            'description',
+            'enum',
+            'format',
+            'minimum',
+            'maximum',
+            'exclusiveMinimum',
+            'exclusiveMaximum',
+            'minLength',
+            'maxLength',
+            'pattern',
+        ];
+
+        foreach ($keysToMerge as $key) {
+            if (! isset($jsonSchemaProps[$key])) {
+                continue;
+            }
+
+            /** @var string|int|float|list<string> $value */
+            $value = $jsonSchemaProps[$key];
+            $schema[$key] = $value;
         }
 
         return $schema;
@@ -209,47 +271,6 @@ final readonly class SchemaConverter implements SchemaConverterInterface
         return ['anyOf' => $anyOf];
     }
 
-    private function getParameterDescription(ReflectionParameter $param): string|null
-    {
-        $paramName = $param->getName();
-
-        if ($this->dictionary !== null) {
-            $description = $this->dictionary->get($paramName);
-            if ($description !== null) {
-                return $description;
-            }
-
-            $camelCase = lcfirst(str_replace(' ', '', ucwords(str_replace('_', ' ', $paramName))));
-            $description = $this->dictionary->get($camelCase);
-            if ($description !== null) {
-                return $description;
-            }
-        }
-
-        $method = $param->getDeclaringFunction();
-        if (! $method instanceof ReflectionMethod) {
-            return null; // @codeCoverageIgnore
-        }
-
-        $docComment = $method->getDocComment();
-        if ($docComment === false) {
-            return null;
-        }
-
-        $docBlock = $this->docBlockFactory->create($docComment);
-        /** @var list<Param> $paramTags */
-        $paramTags = $docBlock->getTagsByName('param');
-        foreach ($paramTags as $tag) {
-            if ($tag->getVariableName() === $paramName) {
-                $description = (string) $tag->getDescription();
-
-                return $description !== '' ? $description : null;
-            }
-        }
-
-        return null;
-    }
-
     private function mapPhpTypeToJsonType(string $phpType): string
     {
         return match ($phpType) {
@@ -280,5 +301,16 @@ final readonly class SchemaConverter implements SchemaConverterInterface
         }
 
         return $attributes[0]->newInstance();
+    }
+
+    /** @param ReflectionClass<ResourceObject> $reflection */
+    private function hasExcludeAttribute(ReflectionClass $reflection): bool
+    {
+        return $reflection->getAttributes(Exclude::class) !== [];
+    }
+
+    private function hasMethodExcludeAttribute(ReflectionMethod $method): bool
+    {
+        return $method->getAttributes(Exclude::class) !== [];
     }
 }

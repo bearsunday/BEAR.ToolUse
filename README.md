@@ -7,8 +7,9 @@ Automatically generates Tool Use definitions from resource classes and manages t
 ## Features
 
 - Auto-generates JSON Schema-based tool definitions from resource classes
-- Enhances semantic descriptions using ALPS profiles
-- Controls tool exposure via `#[Tool]` attribute
+- Enhances parameter descriptions using JSON Schema, ALPS profiles, and PHPDoc
+- Controls tool exposure via `#[Tool]` and `#[Exclude]` attributes
+- URI-based resource specification (`app://self/user`, `page://self/article`)
 - LLM-agnostic design (provides interfaces only)
 
 ## Requirements
@@ -31,8 +32,8 @@ composer require bear/tool-use
 
 namespace MyApp\Resource\App;
 
-use BEAR\ToolUse\Attribute\Tool;
 use BEAR\Resource\ResourceObject;
+use BEAR\ToolUse\Attribute\Tool;
 
 #[Tool(description: 'Manage user information')]
 class User extends ResourceObject
@@ -115,11 +116,14 @@ final class AppModule extends AbstractModule
 <?php
 
 use BEAR\ToolUse\Runtime\AgentFactory;
-use MyApp\Resource\App\User;
 
-// Create agent with factory
+// Create agent with factory (URI-based)
 $agent = $factory
-    ->addResource(User::class, '/user')
+    ->addResources([
+        'app://self/user',
+        'app://self/article',
+        'page://self/search',
+    ])
     ->create('You are a helpful assistant.');
 
 // Run the agent
@@ -130,38 +134,130 @@ if ($response->completed) {
 }
 ```
 
-## Controlling Tool Exposure
+### 5. Conversation History
 
-### Hide Specific Methods
+The agent maintains conversation history across multiple `run()` calls.
 
 ```php
-use BEAR\ToolUse\Attribute\Tool;
+// Continue conversation
+$response = $agent->run('What is their email?');
+
+// Access message history
+$messages = $agent->messages;
+
+// Save for later (e.g., to database or session)
+$savedHistory = $agent->messages;
+
+// Restore conversation and continue
+$agent->messages = $savedHistory;
+$response = $agent->run('Tell me more about this user');
+
+// Clear history to start fresh
+$agent->reset();
+```
+
+## Controlling Tool Exposure
+
+### Exclude Specific Methods
+
+```php
+use BEAR\ToolUse\Attribute\Exclude;
 
 class User extends ResourceObject
 {
-    public function onGet(int $id): static { /* ... */ }
+    public function onGet(int $id): static { /* Exposed */ }
 
-    #[Tool(expose: false)]
+    #[Exclude]
     public function onDelete(int $id): static { /* Hidden */ }
 }
 ```
 
-### Hide Entire Class
+### Exclude Entire Class
 
 ```php
-#[Tool(expose: false)]
+use BEAR\ToolUse\Attribute\Exclude;
+
+#[Exclude]
 class InternalResource extends ResourceObject
 {
     // All methods in this resource are hidden
 }
 ```
 
-### Custom Tool Name
+### Custom Tool Name and Description
 
 ```php
+use BEAR\ToolUse\Attribute\Tool;
+
 #[Tool(name: 'search_users', description: 'Search for users')]
 public function onGet(string $query): static { /* ... */ }
 ```
+
+## JSON Schema Integration
+
+Use BEAR.Resource's JSON Schema for enhanced parameter definitions.
+
+### 1. Install with JsonSchemaModule
+
+```php
+use BEAR\Resource\Module\JsonSchemaModule as ResourceJsonSchemaModule;
+use BEAR\Resource\Module\ResourceModule;
+use BEAR\ToolUse\Module\ToolUseModule;
+
+$this->install(
+    new ToolUseModule(
+        new ResourceJsonSchemaModule(
+            '',                    // json_schema_dir (response)
+            '/path/to/validate',   // json_validate_dir (input params)
+            new ResourceModule('MyApp'),
+        ),
+    ),
+);
+```
+
+### 2. Define JSON Schema
+
+```json
+// /path/to/validate/user.json
+{
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "User ID",
+            "minimum": 1
+        },
+        "status": {
+            "type": "string",
+            "description": "User status",
+            "enum": ["active", "inactive", "pending"]
+        }
+    }
+}
+```
+
+### 3. Apply to Resource
+
+```php
+use BEAR\Resource\Annotation\JsonSchema;
+
+class User extends ResourceObject
+{
+    #[JsonSchema(params: 'user.json')]
+    public function onGet(int $id, string $status = 'active'): static
+    {
+        // JSON Schema provides both runtime validation and tool definitions
+    }
+}
+```
+
+The following properties are extracted from JSON Schema:
+- `description` - Parameter description
+- `enum` - Allowed values
+- `format` - Value format (email, uri, date, etc.)
+- `minimum` / `maximum` - Numeric range
+- `minLength` / `maxLength` - String length
+- `pattern` - Regex pattern
 
 ## ALPS Semantic Descriptions
 
@@ -176,6 +272,14 @@ $converter = new SchemaConverter($dictionary);
 ```
 
 The `title` or `doc.value` from ALPS `semantic` descriptors will be used as parameter descriptions.
+
+## Parameter Description Priority
+
+When multiple sources provide descriptions, they are resolved in this order:
+
+1. **JSON Schema** - `description` property from schema file
+2. **ALPS** - `title` or `doc.value` from semantic descriptor
+3. **PHPDoc** - `@param` tag description
 
 ## Architecture
 

@@ -10,6 +10,7 @@ use BEAR\ToolUse\Fake\Resource\App\FakeDescriptionResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeDocParamResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeHiddenClassResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeHiddenResource;
+use BEAR\ToolUse\Fake\Resource\App\FakeJsonSchemaResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeSearchResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeSnakeCaseResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeTypesResource;
@@ -202,10 +203,12 @@ final class SchemaConverterTest extends TestCase
 
     public function testConverterWithAlpsDictionary(): void
     {
+        $docBlockFactory = DocBlockFactory::createInstance();
         $profilePath = __DIR__ . '/../Fake/alps-profile.json';
         $profile = new Profile($profilePath, new LabelNameTitle());
         $dictionary = new AlpsSemanticDictionary($profile);
-        $converter = new SchemaConverter(DocBlockFactory::createInstance(), $dictionary);
+        $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
+        $converter = new SchemaConverter($docBlockFactory, $descriptionResolver);
 
         $tools = $converter->convert(FakeUserResource::class, '/user');
 
@@ -236,10 +239,12 @@ final class SchemaConverterTest extends TestCase
 
     public function testSnakeCaseToCamelCaseForAlpsDictionary(): void
     {
+        $docBlockFactory = DocBlockFactory::createInstance();
         $profilePath = __DIR__ . '/../Fake/alps-profile.json';
         $profile = new Profile($profilePath, new LabelNameTitle());
         $dictionary = new AlpsSemanticDictionary($profile);
-        $converter = new SchemaConverter(DocBlockFactory::createInstance(), $dictionary);
+        $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
+        $converter = new SchemaConverter($docBlockFactory, $descriptionResolver);
 
         // user_id should be converted to userId for ALPS lookup
         $tools = $converter->convert(FakeSnakeCaseResource::class, '/snake');
@@ -250,10 +255,120 @@ final class SchemaConverterTest extends TestCase
 
     public function testPhpDocParamDescription(): void
     {
-        $tools = $this->converter->convert(FakeDocParamResource::class, '/doc-param');
+        $docBlockFactory = DocBlockFactory::createInstance();
+        $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory);
+        $converter = new SchemaConverter($docBlockFactory, $descriptionResolver);
+
+        $tools = $converter->convert(FakeDocParamResource::class, '/doc-param');
 
         $schema = $tools[0]->inputSchema;
         $this->assertSame('The unique identifier', $schema['properties']['id']['description']);
         $this->assertSame('The display name for this item', $schema['properties']['name']['description']);
+    }
+
+    public function testConverterWithJsonSchema(): void
+    {
+        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
+        $converter = new SchemaConverter(
+            DocBlockFactory::createInstance(),
+            null,
+            $jsonSchemaRepository,
+        );
+
+        $tools = $converter->convert(FakeJsonSchemaResource::class, '/json-schema');
+
+        $schema = $tools[0]->inputSchema;
+
+        // id should have minimum/maximum from JSON Schema
+        $this->assertSame('integer', $schema['properties']['id']['type']);
+        $this->assertSame('User ID (1-1000)', $schema['properties']['id']['description']);
+        $this->assertSame(1, $schema['properties']['id']['minimum']);
+        $this->assertSame(1000, $schema['properties']['id']['maximum']);
+
+        // status should have enum from JSON Schema
+        $this->assertSame(['active', 'inactive', 'pending'], $schema['properties']['status']['enum']);
+    }
+
+    public function testConverterWithJsonSchemaFormat(): void
+    {
+        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
+        $converter = new SchemaConverter(
+            DocBlockFactory::createInstance(),
+            null,
+            $jsonSchemaRepository,
+        );
+
+        $tools = $converter->convert(FakeJsonSchemaResource::class, '/json-schema');
+
+        // POST method
+        $schema = $tools[1]->inputSchema;
+
+        // email should have format from JSON Schema
+        $this->assertSame('email', $schema['properties']['email']['format']);
+
+        // username should have minLength/maxLength/pattern from JSON Schema
+        $this->assertSame(3, $schema['properties']['username']['minLength']);
+        $this->assertSame(20, $schema['properties']['username']['maxLength']);
+        $this->assertSame('^[a-zA-Z0-9_]+$', $schema['properties']['username']['pattern']);
+    }
+
+    public function testJsonSchemaDescriptionTakesPriorityOverPhpDoc(): void
+    {
+        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
+        $converter = new SchemaConverter(
+            DocBlockFactory::createInstance(),
+            null,
+            $jsonSchemaRepository,
+        );
+
+        $tools = $converter->convert(FakeJsonSchemaResource::class, '/json-schema');
+
+        // JSON Schema description should be used
+        $schema = $tools[0]->inputSchema;
+        $this->assertSame('User ID (1-1000)', $schema['properties']['id']['description']);
+    }
+
+    public function testJsonSchemaTakesPriorityOverAlps(): void
+    {
+        $docBlockFactory = DocBlockFactory::createInstance();
+        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
+        $profile = new Profile($profilePath, new LabelNameTitle());
+        $dictionary = new AlpsSemanticDictionary($profile);
+        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
+        $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository, $dictionary);
+
+        $converter = new SchemaConverter(
+            $docBlockFactory,
+            $descriptionResolver,
+            $jsonSchemaRepository,
+        );
+
+        $tools = $converter->convert(FakeJsonSchemaResource::class, '/json-schema');
+
+        // JSON Schema description should be used over ALPS dictionary
+        $schema = $tools[0]->inputSchema;
+        $this->assertSame('User ID (1-1000)', $schema['properties']['id']['description']);
+    }
+
+    public function testFallbackToAlpsWhenNoJsonSchema(): void
+    {
+        $docBlockFactory = DocBlockFactory::createInstance();
+        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
+        $profile = new Profile($profilePath, new LabelNameTitle());
+        $dictionary = new AlpsSemanticDictionary($profile);
+        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
+        $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository, $dictionary);
+
+        $converter = new SchemaConverter(
+            $docBlockFactory,
+            $descriptionResolver,
+            $jsonSchemaRepository,
+        );
+
+        // FakeUserResource has no #[JsonSchema] attribute, so should use ALPS
+        $tools = $converter->convert(FakeUserResource::class, '/user');
+
+        $schema = $tools[0]->inputSchema;
+        $this->assertSame('User identifier', $schema['properties']['userId']['description']);
     }
 }

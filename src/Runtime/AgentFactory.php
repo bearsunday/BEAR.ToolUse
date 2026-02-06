@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Runtime;
 
-use BEAR\Resource\ResourceObject;
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use BEAR\ToolUse\Llm\LlmClientInterface;
@@ -28,32 +27,15 @@ final class AgentFactory
     }
 
     /**
-     * Add a resource as a tool
+     * Add resources as tools
      *
-     * @param class-string<ResourceObject> $resourceClass
-     *
-     * @return $this
-     */
-    public function addResource(string $resourceClass, string $resourcePath): self
-    {
-        $tools = $this->collector->collect($resourceClass, $resourcePath);
-        foreach ($tools as $tool) {
-            $this->tools[] = $tool;
-        }
-
-        return $this;
-    }
-
-    /**
-     * Add multiple resources as tools
-     *
-     * @param array<class-string<ResourceObject>, string> $resources Map of class => path
+     * @param list<string> $uris List of full resource URIs (e.g., ["app://self/user", "app://self/article"])
      *
      * @return $this
      */
-    public function addResources(array $resources): self
+    public function addResources(array $uris): self
     {
-        $tools = $this->collector->collectAll($resources);
+        $tools = $this->collector->collect($uris);
         foreach ($tools as $tool) {
             $this->tools[] = $tool;
         }

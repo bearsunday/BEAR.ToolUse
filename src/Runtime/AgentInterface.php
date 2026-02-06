@@ -18,11 +18,4 @@ interface AgentInterface
      * Clear conversation history to start a new conversation
      */
     public function reset(): void;
-
-    /**
-     * Get all messages in the conversation
-     *
-     * @return list<Message>
-     */
-    public function getMessages(): array;
 }

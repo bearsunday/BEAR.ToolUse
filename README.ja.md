@@ -7,8 +7,9 @@ BEAR.SundayアプリケーションをAIエージェント対応にするライ�
 ## 特徴
 
 - リソースクラスからJSON Schemaベースのツール定義を自動生成
-- ALPSプロファイルによるセマンティック記述の補強
-- `#[Tool]`アトリビュートによる公開制御
+- JSON Schema、ALPSプロファイル、PHPDocによるパラメータ説明の補強
+- `#[Tool]`と`#[Exclude]`アトリビュートによる公開制御
+- URIベースのリソース指定（`app://self/user`、`page://self/article`）
 - LLM実装に依存しない設計（インターフェイスのみ提供）
 
 ## 要件
@@ -31,8 +32,8 @@ composer require bear/tool-use
 
 namespace MyApp\Resource\App;
 
-use BEAR\ToolUse\Attribute\Tool;
 use BEAR\Resource\ResourceObject;
+use BEAR\ToolUse\Attribute\Tool;
 
 #[Tool(description: 'ユーザー情報を管理')]
 class User extends ResourceObject
@@ -115,11 +116,14 @@ final class AppModule extends AbstractModule
 <?php
 
 use BEAR\ToolUse\Runtime\AgentFactory;
-use MyApp\Resource\App\User;
 
-// ファクトリーでエージェントを作成
+// ファクトリーでエージェントを作成（URIベース）
 $agent = $factory
-    ->addResource(User::class, '/user')
+    ->addResources([
+        'app://self/user',
+        'app://self/article',
+        'page://self/search',
+    ])
     ->create('あなたは親切なアシスタントです。');
 
 // エージェントを実行
@@ -130,38 +134,130 @@ if ($response->completed) {
 }
 ```
 
+### 5. 会話履歴
+
+エージェントは複数の `run()` 呼び出しにわたって会話履歴を保持します。
+
+```php
+// 会話を継続
+$response = $agent->run('そのユーザーのメールアドレスは？');
+
+// メッセージ履歴にアクセス
+$messages = $agent->messages;
+
+// 後で使用するために保存（例：DBやセッションに）
+$savedHistory = $agent->messages;
+
+// 会話を復元して継続
+$agent->messages = $savedHistory;
+$response = $agent->run('このユーザーについてもっと教えて');
+
+// 履歴をクリアして新しい会話を開始
+$agent->reset();
+```
+
 ## ツール公開の制御
 
-### メソッド単位での非公開
+### メソッド単位での除外
+
+```php
+use BEAR\ToolUse\Attribute\Exclude;
+
+class User extends ResourceObject
+{
+    public function onGet(int $id): static { /* 公開される */ }
+
+    #[Exclude]
+    public function onDelete(int $id): static { /* 除外 */ }
+}
+```
+
+### クラス全体を除外
+
+```php
+use BEAR\ToolUse\Attribute\Exclude;
+
+#[Exclude]
+class InternalResource extends ResourceObject
+{
+    // このリソースの全メソッドが除外
+}
+```
+
+### カスタムツール名と説明
 
 ```php
 use BEAR\ToolUse\Attribute\Tool;
 
-class User extends ResourceObject
-{
-    public function onGet(int $id): static { /* ... */ }
-
-    #[Tool(expose: false)]
-    public function onDelete(int $id): static { /* 非公開 */ }
-}
-```
-
-### クラス全体を非公開
-
-```php
-#[Tool(expose: false)]
-class InternalResource extends ResourceObject
-{
-    // このリソースの全メソッドが非公開
-}
-```
-
-### カスタムツール名
-
-```php
 #[Tool(name: 'search_users', description: 'ユーザーを検索')]
 public function onGet(string $query): static { /* ... */ }
 ```
+
+## JSON Schemaの統合
+
+BEAR.ResourceのJSON Schemaを使用してパラメータ定義を強化できます。
+
+### 1. JsonSchemaModuleと共にインストール
+
+```php
+use BEAR\Resource\Module\JsonSchemaModule as ResourceJsonSchemaModule;
+use BEAR\Resource\Module\ResourceModule;
+use BEAR\ToolUse\Module\ToolUseModule;
+
+$this->install(
+    new ToolUseModule(
+        new ResourceJsonSchemaModule(
+            '',                    // json_schema_dir（レスポンス用）
+            '/path/to/validate',   // json_validate_dir（入力パラメータ用）
+            new ResourceModule('MyApp'),
+        ),
+    ),
+);
+```
+
+### 2. JSON Schemaの定義
+
+```json
+// /path/to/validate/user.json
+{
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "description": "ユーザーID",
+            "minimum": 1
+        },
+        "status": {
+            "type": "string",
+            "description": "ユーザーステータス",
+            "enum": ["active", "inactive", "pending"]
+        }
+    }
+}
+```
+
+### 3. リソースへの適用
+
+```php
+use BEAR\Resource\Annotation\JsonSchema;
+
+class User extends ResourceObject
+{
+    #[JsonSchema(params: 'user.json')]
+    public function onGet(int $id, string $status = 'active'): static
+    {
+        // JSON Schemaによるランタイムバリデーションとツール定義の両方に使用
+    }
+}
+```
+
+JSON Schemaから以下のプロパティが抽出されます：
+- `description` - パラメータの説明
+- `enum` - 許可される値
+- `format` - 値のフォーマット（email、uri、date等）
+- `minimum` / `maximum` - 数値の範囲
+- `minLength` / `maxLength` - 文字列の長さ
+- `pattern` - 正規表現パターン
 
 ## ALPSによるセマンティック記述
 
@@ -176,6 +272,14 @@ $converter = new SchemaConverter($dictionary);
 ```
 
 ALPSプロファイルの`semantic`記述子から`title`または`doc.value`がパラメータの説明として使用されます。
+
+## パラメータ説明の優先順位
+
+複数のソースが説明を提供する場合、以下の順序で解決されます：
+
+1. **JSON Schema** - スキーマファイルの`description`プロパティ
+2. **ALPS** - セマンティック記述子の`title`または`doc.value`
+3. **PHPDoc** - `@param`タグの説明
 
 ## アーキテクチャ
 
