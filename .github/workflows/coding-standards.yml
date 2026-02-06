@@ -1,0 +1,10 @@
+name: Coding Standards
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cs:
+    uses: ray-di/.github/.github/workflows/coding-standards.yml@v1

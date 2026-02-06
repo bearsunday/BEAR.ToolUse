@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<psalm
+    errorLevel="1"
+    phpVersion="8.2"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="https://getpsalm.org/schema/config"
+    xsi:schemaLocation="https://getpsalm.org/schema/config vendor-bin/tools/vendor/vimeo/psalm/config.xsd"
+    findUnusedPsalmSuppress="true"
+    findUnusedBaselineEntry="false"
+    findUnusedCode="false"
+>
+    <projectFiles>
+        <directory name="src"/>
+        <ignoreFiles>
+            <directory name="vendor"/>
+            <directory name="vendor-bin"/>
+            <directory name="tests"/>
+        </ignoreFiles>
+    </projectFiles>
+
+    <issueHandlers>
+        <!-- Suppress common false positives -->
+        <MissingConstructor errorLevel="suppress"/>
+        <UnusedClass errorLevel="suppress"/>
+        <PossiblyUnusedMethod errorLevel="suppress"/>
+        <PossiblyUnusedProperty errorLevel="suppress"/>
+        <PossiblyUnusedReturnValue errorLevel="suppress"/>
+
+        <!-- Mixed content for AgentResponse -->
+        <MixedAssignment>
+            <errorLevel type="suppress">
+                <file name="src/Runtime/AgentResponse.php"/>
+            </errorLevel>
+        </MixedAssignment>
+
+        <!-- ALPS SDK type quirks -->
+        <RedundantCondition>
+            <errorLevel type="suppress">
+                <file name="src/Schema/AlpsSemanticDictionary.php"/>
+            </errorLevel>
+        </RedundantCondition>
+    </issueHandlers>
+</psalm>

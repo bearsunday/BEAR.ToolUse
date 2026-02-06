@@ -1,0 +1,13 @@
+/vendor/
+/vendor-bin/*/vendor/
+/composer.lock
+/vendor-bin/*/composer.lock
+/.phpunit.cache/
+/.psalm/
+/build/
+*.cache
+.phpcs-cache
+.DS_Store
+.idea/
+.vscode/
+*.log

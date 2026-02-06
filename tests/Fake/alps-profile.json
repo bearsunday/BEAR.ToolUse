@@ -1,0 +1,24 @@
+{
+  "$schema": "https://alps-io.github.io/schemas/alps.json",
+  "alps": {
+    "version": "1.0",
+    "descriptor": [
+      {
+        "id": "userId",
+        "type": "semantic",
+        "title": "User identifier"
+      },
+      {
+        "id": "userName",
+        "type": "semantic",
+        "doc": {
+          "value": "Name of the user"
+        }
+      },
+      {
+        "id": "email",
+        "type": "semantic"
+      }
+    ]
+  }
+}
