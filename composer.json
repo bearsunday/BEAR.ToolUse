@@ -3,7 +3,6 @@
     "description": "LLM Tool Use support for BEAR.Sunday applications",
     "license": "MIT",
     "type": "library",
-    "version": "0.1.0",
     "keywords": [
         "BEAR.Sunday",
         "AI",
