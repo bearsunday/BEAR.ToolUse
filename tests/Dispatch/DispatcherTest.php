@@ -167,4 +167,37 @@ final class DispatcherTest extends TestCase
 
         $this->assertFalse($result->isError);
     }
+
+    public function testDispatchWithErrorStatusCode(): void
+    {
+        $this->registry->register('status_error_get', 'app://self/status-error', 'get');
+        $toolCall = new ToolCall('call_status', 'status_error_get', ['code' => 400]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertTrue($result->isError);
+        $this->assertStringContainsString('400:', $result->content);
+        $this->assertStringContainsString('Validation failed', $result->content);
+    }
+
+    public function testDispatchWithServerErrorStatusCode(): void
+    {
+        $this->registry->register('status_error_get', 'app://self/status-error', 'get');
+        $toolCall = new ToolCall('call_status', 'status_error_get', ['code' => 500]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertTrue($result->isError);
+        $this->assertStringContainsString('500:', $result->content);
+    }
+
+    public function testDispatchWithSuccessStatusCode(): void
+    {
+        $this->registry->register('crud_get', 'app://self/crud', 'get');
+        $toolCall = new ToolCall('call_success', 'crud_get', ['id' => 1]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertFalse($result->isError);
+    }
 }

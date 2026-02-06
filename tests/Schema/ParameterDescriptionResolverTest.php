@@ -8,6 +8,7 @@ use BEAR\ToolUse\Fake\Resource\App\FakeDocParamResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeEmptyDocResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeJsonSchemaResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeMissingParamDocResource;
+use BEAR\ToolUse\Fake\Resource\App\FakeNoDescriptionResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeSnakeCaseResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeUserResource;
 use Koriym\AppStateDiagram\LabelNameTitle;
@@ -181,6 +182,23 @@ final class ParameterDescriptionResolverTest extends TestCase
 
         $description = $resolver->resolve($param, null);
 
+        $this->assertNull($description);
+    }
+
+    public function testReturnsNullWhenJsonSchemaHasNoDescription(): void
+    {
+        $docBlockFactory = DocBlockFactory::createInstance();
+        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
+        $resolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository);
+
+        $reflection = new ReflectionClass(FakeNoDescriptionResource::class);
+        $method = $reflection->getMethod('onGet');
+        $param = $method->getParameters()[0]; // id (has schema but no description)
+
+        $jsonSchema = $jsonSchemaRepository->getParameterSchema(FakeNoDescriptionResource::class, 'onGet');
+        $description = $resolver->resolve($param, $jsonSchema);
+
+        // Should return null because JSON Schema property has no description
         $this->assertNull($description);
     }
 }

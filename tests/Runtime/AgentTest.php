@@ -279,4 +279,154 @@ final class AgentTest extends TestCase
 
         $this->assertSame('Valid', $response->getText());
     }
+
+    public function testToolErrorFeedbackLoop(): void
+    {
+        // Register error tool
+        $injector = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource = $injector->getInstance(ResourceInterface::class);
+        $registry = new ToolRegistry();
+        $registry->register('error_get', 'app://self/error', 'get');
+        $dispatcher = new Dispatcher($resource, $registry);
+
+        $tools = [
+            new Tool('error_get', 'Get error resource', [
+                'type' => 'object',
+                'properties' => [],
+                'required' => [],
+            ]),
+        ];
+
+        $llmClient = new FakeLlmClient();
+        $agent = new Agent(
+            client: $llmClient,
+            dispatcher: $dispatcher,
+            tools: $tools,
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+
+        // 1st LLM call: returns tool_use → dispatch will fail with exception
+        $llmClient->queueToolUseResponse('call_1', 'error_get', []);
+        // 2nd LLM call: LLM receives error, responds with text
+        $llmClient->queueTextResponse('The tool returned an error. Let me help you differently.');
+
+        $response = $agent->run('Call the error tool');
+
+        // Verify the agent completed after receiving error feedback
+        $this->assertTrue($response->completed);
+        $this->assertSame('The tool returned an error. Let me help you differently.', $response->getText());
+
+        // Verify the LLM received the error in its 2nd call
+        $this->assertCount(2, $llmClient->calls);
+        $secondCallMessages = $llmClient->calls[1]['messages'];
+        // Messages: [user, assistant(tool_use), user(tool_result with error)]
+        $this->assertCount(3, $secondCallMessages);
+        $toolResultMessage = $secondCallMessages[2];
+        $this->assertSame('user', $toolResultMessage->role);
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertStringContainsString('RuntimeException', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testToolErrorFeedbackLoopWithRetry(): void
+    {
+        // Register both error and success tools
+        $injector = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource = $injector->getInstance(ResourceInterface::class);
+        $registry = new ToolRegistry();
+        $registry->register('error_get', 'app://self/error', 'get');
+        $registry->register('article_get', 'app://self/article', 'get');
+        $dispatcher = new Dispatcher($resource, $registry);
+
+        $tools = [
+            new Tool('error_get', 'Get error resource', [
+                'type' => 'object',
+                'properties' => [],
+                'required' => [],
+            ]),
+            new Tool('article_get', 'Get an article', [
+                'type' => 'object',
+                'properties' => ['id' => ['type' => 'integer']],
+                'required' => ['id'],
+            ]),
+        ];
+
+        $llmClient = new FakeLlmClient();
+        $agent = new Agent(
+            client: $llmClient,
+            dispatcher: $dispatcher,
+            tools: $tools,
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+
+        // 1st LLM call: tries error tool → fails
+        $llmClient->queueToolUseResponse('call_1', 'error_get', []);
+        // 2nd LLM call: LLM sees error, retries with different tool
+        $llmClient->queueToolUseResponse('call_2', 'article_get', ['id' => 1]);
+        // 3rd LLM call: LLM gets success result, returns completion
+        $llmClient->queueTextResponse('I found the article for you.');
+
+        $response = $agent->run('Find information');
+
+        // Agent should complete after error → retry → success
+        $this->assertTrue($response->completed);
+        $this->assertSame('I found the article for you.', $response->getText());
+
+        // Verify 3 LLM calls occurred (initial + error feedback + success feedback)
+        $this->assertCount(3, $llmClient->calls);
+
+        // Verify error was fed back in 2nd call
+        $secondCallMessages = $llmClient->calls[1]['messages'];
+        $toolResultMessage = $secondCallMessages[2];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+
+        // Verify success was fed back in 3rd call
+        $thirdCallMessages = $llmClient->calls[2]['messages'];
+        $toolResultMessage = $thirdCallMessages[4];
+        $this->assertFalse($toolResultMessage->content[0]['is_error']);
+    }
+
+    public function testToolErrorFeedbackLoopWithStatusCode(): void
+    {
+        // Register status error tool
+        $injector = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource = $injector->getInstance(ResourceInterface::class);
+        $registry = new ToolRegistry();
+        $registry->register('status_error_get', 'app://self/status-error', 'get');
+        $dispatcher = new Dispatcher($resource, $registry);
+
+        $tools = [
+            new Tool('status_error_get', 'Get status error resource', [
+                'type' => 'object',
+                'properties' => ['code' => ['type' => 'integer']],
+                'required' => [],
+            ]),
+        ];
+
+        $llmClient = new FakeLlmClient();
+        $agent = new Agent(
+            client: $llmClient,
+            dispatcher: $dispatcher,
+            tools: $tools,
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+
+        // 1st LLM call: tries tool → returns 400 status
+        $llmClient->queueToolUseResponse('call_1', 'status_error_get', ['code' => 400]);
+        // 2nd LLM call: LLM sees HTTP 400 error, responds with guidance
+        $llmClient->queueTextResponse('The request failed with a validation error. The "name" field is required.');
+
+        $response = $agent->run('Call the status error tool');
+
+        $this->assertTrue($response->completed);
+
+        // Verify the LLM received the HTTP status error
+        $secondCallMessages = $llmClient->calls[1]['messages'];
+        $toolResultMessage = $secondCallMessages[2];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertStringContainsString('400:', $toolResultMessage->content[0]['content']);
+        $this->assertStringContainsString('Validation failed', $toolResultMessage->content[0]['content']);
+    }
 }
