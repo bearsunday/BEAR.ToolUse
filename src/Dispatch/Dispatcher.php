@@ -22,6 +22,8 @@ use const JSON_UNESCAPED_UNICODE;
  */
 final readonly class Dispatcher implements DispatcherInterface
 {
+    private const int HTTP_ERROR_THRESHOLD = 400;
+
     public function __construct(
         private ResourceInterface $resource,
         private ToolRegistryInterface $registry,
@@ -40,13 +42,22 @@ final readonly class Dispatcher implements DispatcherInterface
         }
 
         try {
-            $result = $this->executeResource(
+            $ro = $this->invokeResource(
                 $mapping['resourceUri'],
                 $mapping['method'],
                 $toolCall->input,
             );
 
-            return ToolResult::success($toolCall->id, $result);
+            $content = json_encode($ro->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+            if ($ro->code >= self::HTTP_ERROR_THRESHOLD) {
+                return ToolResult::error(
+                    $toolCall->id,
+                    sprintf('HTTP %d: %s', $ro->code, $content),
+                );
+            }
+
+            return ToolResult::success($toolCall->id, $content);
         } catch (Throwable $e) {
             return ToolResult::error(
                 $toolCall->id,
@@ -56,7 +67,7 @@ final readonly class Dispatcher implements DispatcherInterface
     }
 
     /** @param array<string, mixed> $input */
-    private function executeResource(string $uri, string $method, array $input): string
+    private function invokeResource(string $uri, string $method, array $input): ResourceObject
     {
         $httpMethod = strtoupper($method);
 
@@ -70,6 +81,6 @@ final readonly class Dispatcher implements DispatcherInterface
             default => $this->resource->get($uri, $input),
         };
 
-        return json_encode($ro->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        return $ro;
     }
 }
