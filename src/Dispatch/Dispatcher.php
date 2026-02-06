@@ -22,7 +22,7 @@ use const JSON_UNESCAPED_UNICODE;
  */
 final readonly class Dispatcher implements DispatcherInterface
 {
-    private const int HTTP_ERROR_THRESHOLD = 400;
+    private const HTTP_ERROR_THRESHOLD = 400;
 
     public function __construct(
         private ResourceInterface $resource,
