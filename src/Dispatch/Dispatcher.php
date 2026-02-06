@@ -22,7 +22,7 @@ use const JSON_UNESCAPED_UNICODE;
  */
 final readonly class Dispatcher implements DispatcherInterface
 {
-    private const HTTP_ERROR_THRESHOLD = 400;
+    private const ERROR_STATUS_THRESHOLD = 400;
 
     public function __construct(
         private ResourceInterface $resource,
@@ -50,10 +50,10 @@ final readonly class Dispatcher implements DispatcherInterface
 
             $content = json_encode($ro->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-            if ($ro->code >= self::HTTP_ERROR_THRESHOLD) {
+            if ($ro->code >= self::ERROR_STATUS_THRESHOLD) {
                 return ToolResult::error(
                     $toolCall->id,
-                    sprintf('HTTP %d: %s', $ro->code, $content),
+                    sprintf('%d: %s', $ro->code, $content),
                 );
             }
 

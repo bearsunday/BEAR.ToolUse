@@ -426,7 +426,7 @@ final class AgentTest extends TestCase
         $secondCallMessages = $llmClient->calls[1]['messages'];
         $toolResultMessage = $secondCallMessages[2];
         $this->assertTrue($toolResultMessage->content[0]['is_error']);
-        $this->assertStringContainsString('HTTP 400', $toolResultMessage->content[0]['content']);
+        $this->assertStringContainsString('400:', $toolResultMessage->content[0]['content']);
         $this->assertStringContainsString('Validation failed', $toolResultMessage->content[0]['content']);
     }
 }

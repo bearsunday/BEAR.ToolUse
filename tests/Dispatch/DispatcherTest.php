@@ -176,7 +176,7 @@ final class DispatcherTest extends TestCase
         $result = $this->dispatcher->dispatch($toolCall);
 
         $this->assertTrue($result->isError);
-        $this->assertStringContainsString('HTTP 400', $result->content);
+        $this->assertStringContainsString('400:', $result->content);
         $this->assertStringContainsString('Validation failed', $result->content);
     }
 
@@ -188,7 +188,7 @@ final class DispatcherTest extends TestCase
         $result = $this->dispatcher->dispatch($toolCall);
 
         $this->assertTrue($result->isError);
-        $this->assertStringContainsString('HTTP 500', $result->content);
+        $this->assertStringContainsString('500:', $result->content);
     }
 
     public function testDispatchWithSuccessStatusCode(): void
