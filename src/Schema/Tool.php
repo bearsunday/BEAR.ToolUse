@@ -19,6 +19,7 @@ final readonly class Tool implements JsonSerializable
         public string $name,
         public string $description,
         public array $inputSchema,
+        public bool $confirm = false,
     ) {
     }
 

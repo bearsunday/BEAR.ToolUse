@@ -17,6 +17,7 @@ final class Tool
     public function __construct(
         public string|null $name = null,
         public string|null $description = null,
+        public bool $confirm = false,
     ) {
     }
 }

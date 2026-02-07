@@ -65,6 +65,28 @@ final class FakeLlmClient implements LlmClientInterface
     }
 
     /**
+     * Queue a tool use response with text
+     *
+     * @param array<string, mixed> $input
+     */
+    public function queueToolUseWithTextResponse(string $toolId, string $toolName, array $input, string $text): void
+    {
+        $this->responses[] = new LlmResponse(
+            stopReason: 'tool_use',
+            content: [
+                ['type' => 'text', 'text' => $text],
+                [
+                    'type' => 'tool_use',
+                    'id' => $toolId,
+                    'name' => $toolName,
+                    'input' => $input,
+                ],
+            ],
+            toolCalls: [new ToolCall($toolId, $toolName, $input)],
+        );
+    }
+
+    /**
      * Queue a max_tokens response
      */
     public function queueMaxTokensResponse(string $partialText): void
@@ -113,7 +135,7 @@ final class FakeLlmClient implements LlmClientInterface
     public function reset(): void
     {
         $this->responses = [];
-        $this->calls = [];
+        $this->calls     = [];
         $this->callIndex = 0;
     }
 }
