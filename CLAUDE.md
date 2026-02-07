@@ -123,7 +123,7 @@ The agent supports user confirmation before executing destructive tool calls.
 
 1. `#[Tool(confirm: true)]` marks tools as confirmable (class or method level)
 2. `SchemaConverter::resolveConfirm()` reads confirm flag (method attribute takes priority over class)
-3. `Schema\Tool::$confirm` stores the flag (excluded from `jsonSerialize()` — not sent to LLM)
+3. `Schema\Tool::$confirm` stores the flag (included in `jsonSerialize()` as `confirm: true` only when true)
 4. `Agent::isCancelled()` checks if tool requires confirmation and calls `ConfirmationHandlerInterface`
 5. On cancellation, `ToolResult::error()` sends `"User cancelled this operation."` back to LLM
 
@@ -132,7 +132,7 @@ The agent supports user confirmation before executing destructive tool calls.
 - `ConfirmationHandlerInterface` is user-implemented (like `LlmClientInterface`)
 - LLM's text response serves as the confirmation message (no templates needed)
 - If no handler is bound, confirmable tools execute normally (no blocking)
-- The `confirm` property is internal metadata — never serialized to the LLM
+- The `confirm` property is serialized to JSON only when `true` (omitted when `false`)
 
 ## Notes
 

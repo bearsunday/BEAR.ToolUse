@@ -59,16 +59,23 @@ final class SchemaConverterConfirmTest extends TestCase
         $this->assertFalse($tools[0]->confirm);
     }
 
-    public function testConfirmNotSerializedToJson(): void
+    public function testConfirmTrueSerializedToJson(): void
     {
         $tools = $this->converter->convert(FakeConfirmableResource::class, '/confirmable');
 
-        $json = json_encode($tools[0]);
+        $json    = json_encode($tools[0]);
         $decoded = json_decode((string) $json, true);
 
-        $this->assertArrayHasKey('name', $decoded);
-        $this->assertArrayHasKey('description', $decoded);
-        $this->assertArrayHasKey('input_schema', $decoded);
+        $this->assertTrue($decoded['confirm']);
+    }
+
+    public function testConfirmFalseOmittedFromJson(): void
+    {
+        $tools = $this->converter->convert(FakeArticleResource::class, '/article');
+
+        $json    = json_encode($tools[0]);
+        $decoded = json_decode((string) $json, true);
+
         $this->assertArrayNotHasKey('confirm', $decoded);
     }
 }
