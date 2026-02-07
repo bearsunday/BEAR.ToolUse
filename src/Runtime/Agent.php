@@ -110,21 +110,28 @@ final class Agent implements AgentInterface
     {
         $toolResults = [];
         foreach ($response->toolCalls as $toolCall) {
-            if ($this->requiresConfirmation($toolCall)) {
-                $llmText             = $response->getText();
-                $confirmationHandler = $this->confirmationHandler;
-                assert($confirmationHandler instanceof ConfirmationHandlerInterface);
-                if (! $confirmationHandler->confirm($toolCall, $llmText)) {
-                    $toolResults[] = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
+            if ($this->isCancelled($toolCall, $response)) {
+                $toolResults[] = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
 
-                    continue;
-                }
+                continue;
             }
 
             $toolResults[] = $this->dispatcher->dispatch($toolCall);
         }
 
         return $toolResults;
+    }
+
+    private function isCancelled(ToolCall $toolCall, LlmResponse $response): bool
+    {
+        if (! $this->requiresConfirmation($toolCall)) {
+            return false;
+        }
+
+        $confirmationHandler = $this->confirmationHandler;
+        assert($confirmationHandler instanceof ConfirmationHandlerInterface);
+
+        return ! $confirmationHandler->confirm($toolCall, $response->getText());
     }
 
     private function requiresConfirmation(ToolCall $toolCall): bool

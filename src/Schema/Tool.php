@@ -11,7 +11,7 @@ use Override;
  * Tool definition for AI agent
  *
  * @psalm-type InputSchema = array{type: string, properties: array<string, mixed>, required?: list<string>}
- * @SuppressWarnings(PHPMD.BooleanArgumentFlag)
+ * @SuppressWarnings("PHPMD.BooleanArgumentFlag")
  */
 final readonly class Tool implements JsonSerializable
 {
