@@ -10,6 +10,7 @@ use Attribute;
  * Defines tool metadata for AI agents
  *
  * @codeCoverageIgnore
+ * @SuppressWarnings(PHPMD.BooleanArgumentFlag)
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
 final class Tool
