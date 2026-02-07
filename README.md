@@ -193,6 +193,75 @@ use BEAR\ToolUse\Attribute\Tool;
 public function onGet(string $query): static { /* ... */ }
 ```
 
+## Human-in-the-Loop Confirmation
+
+Add `confirm: true` to require user confirmation before executing destructive tool calls.
+
+### Mark Tools as Confirmable
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// Class level - all methods require confirmation
+#[Tool(confirm: true)]
+class User extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+    public function onDelete(int $id): static { /* ... */ }
+}
+
+// Method level - only specific methods require confirmation
+class Article extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+
+    #[Tool(confirm: true)]
+    public function onDelete(int $id): static { /* ... */ }
+}
+```
+
+### Implement Confirmation Handler
+
+```php
+use BEAR\ToolUse\Runtime\ConfirmationHandlerInterface;
+use BEAR\ToolUse\Dispatch\ToolCall;
+
+final class CliConfirmationHandler implements ConfirmationHandlerInterface
+{
+    public function confirm(ToolCall $toolCall, string $llmText): bool
+    {
+        echo $llmText . "\nProceed? [Y/n]: ";
+
+        return trim(fgets(STDIN)) !== 'n';
+    }
+}
+```
+
+### Bind in DI Module
+
+```php
+$this->bind(ConfirmationHandlerInterface::class)->to(CliConfirmationHandler::class);
+```
+
+### How It Works
+
+The LLM's text response serves as the confirmation message. No templates needed.
+
+```
+User: "Delete article 123"
+  ↓
+LLM: "I will delete article 123 'Introduction to BEAR.Sunday'."
+     tool_use: article_delete({id: 123})
+  ↓
+ConfirmationHandler: "I will delete article 123 'Introduction to BEAR.Sunday'."
+                     Proceed? [Y/n]:
+  ↓
+Y → Tool executed
+N → "User cancelled this operation." → LLM: "Understood."
+```
+
+If no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking).
+
 ## JSON Schema Integration
 
 Use BEAR.Resource's JSON Schema for enhanced parameter definitions.
@@ -338,6 +407,7 @@ Errors detected by the Dispatcher:
 | `SchemaConverterInterface` | Converts resources to tool definitions |
 | `ToolCollectorInterface` | Collects and registers tools |
 | `AgentInterface` | Agent runtime |
+| `ConfirmationHandlerInterface` | User confirmation for destructive tools |
 
 ### Main Classes
 
