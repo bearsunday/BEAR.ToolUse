@@ -6,6 +6,7 @@ namespace BEAR\ToolUse\Fake;
 
 use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Runtime\ConfirmationHandlerInterface;
+use Override;
 
 /**
  * Fake confirmation handler for testing
@@ -22,6 +23,7 @@ final class FakeConfirmationHandler implements ConfirmationHandlerInterface
         $this->willConfirm = $willConfirm;
     }
 
+    #[Override]
     public function confirm(ToolCall $toolCall, string $llmText): bool
     {
         $this->calls[] = [

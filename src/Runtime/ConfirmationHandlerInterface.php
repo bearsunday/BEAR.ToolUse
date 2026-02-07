@@ -11,8 +11,6 @@ use BEAR\ToolUse\Dispatch\ToolCall;
  *
  * Implement this interface to control how confirmation is presented to the user.
  * The LLM's text response serves as the confirmation message.
- *
- * @psalm-type ContentBlock = array{type: string, text?: string, id?: string, name?: string, input?: array<string, mixed>}
  */
 interface ConfirmationHandlerInterface
 {
