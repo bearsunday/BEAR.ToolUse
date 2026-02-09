@@ -48,5 +48,26 @@ final class ToolTest extends TestCase
         $this->assertSame('article_get', $json['name']);
         $this->assertSame('Get an article by ID', $json['description']);
         $this->assertSame('object', $json['input_schema']['type']);
+        $this->assertArrayNotHasKey('confirm', $json);
+    }
+
+    public function testJsonSerializeWithConfirm(): void
+    {
+        $tool = new Tool(
+            name: 'article_delete',
+            description: 'Delete an article by ID',
+            inputSchema: [
+                'type' => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                ],
+                'required' => ['id'],
+            ],
+            confirm: true,
+        );
+
+        $json = $tool->jsonSerialize();
+
+        $this->assertTrue($json['confirm']);
     }
 }
