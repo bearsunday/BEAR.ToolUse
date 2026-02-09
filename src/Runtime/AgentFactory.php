@@ -23,6 +23,7 @@ final class AgentFactory
         private readonly DispatcherInterface $dispatcher,
         private readonly ToolCollectorInterface $collector,
         private readonly ToolRegistryInterface $registry,
+        private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
     }
 
@@ -54,6 +55,7 @@ final class AgentFactory
             tools: $this->tools,
             systemPrompt: $systemPrompt,
             maxIterations: $maxIterations,
+            confirmationHandler: $this->confirmationHandler,
         );
     }
 

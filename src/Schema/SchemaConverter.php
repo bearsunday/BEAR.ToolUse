@@ -82,13 +82,22 @@ final readonly class SchemaConverter implements SchemaConverterInterface
         $httpMethod = strtolower(str_replace('on', '', $method->getName()));
         $name = $this->buildToolName($resourcePath, $httpMethod, $methodAttribute);
         $description = $this->buildDescription($method, $classAttribute, $methodAttribute);
+        $confirm = $this->resolveConfirm($classAttribute, $methodAttribute);
 
         // Load JSON Schema for this method if available
         $jsonSchema = $this->jsonSchemaRepository?->getParameterSchema($resourceClass, $method->getName());
 
         $inputSchema = $this->buildInputSchema($method, $jsonSchema);
 
-        return new Tool($name, $description, $inputSchema);
+        return new Tool($name, $description, $inputSchema, $confirm);
+    }
+
+    private function resolveConfirm(ToolAttribute|null $classAttribute, ToolAttribute|null $methodAttribute): bool
+    {
+        $confirm = $methodAttribute?->confirm;
+        $confirm ??= $classAttribute?->confirm;
+
+        return $confirm ?? false;
     }
 
     private function buildToolName(string $resourcePath, string $httpMethod, ToolAttribute|null $attribute): string

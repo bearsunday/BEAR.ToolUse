@@ -11,7 +11,7 @@ A library that enables AI agent capabilities for BEAR.Sunday applications. Autom
 ```
 src/
 ├── Attribute/           # PHP Attributes
-│   ├── Tool.php         # Tool metadata (name, description)
+│   ├── Tool.php         # Tool metadata (name, description, confirm)
 │   └── Exclude.php      # Exclude from tool exposure
 ├── Dispatch/            # Tool execution
 │   ├── DispatcherInterface.php
@@ -36,6 +36,7 @@ src/
 │   ├── Agent.php        # Agent loop
 │   ├── AgentFactory.php # Agent builder
 │   ├── AgentResponse.php
+│   ├── ConfirmationHandlerInterface.php # User confirmation
 │   └── Message.php
 ├── Llm/                 # LLM related
 │   ├── LlmClientInterface.php  # User implementation
@@ -67,7 +68,8 @@ composer tests    # cs + sa + test
 ### BEAR.Sunday Integration
 
 - Expose resource classes as tools via full URI (`app://self/user`, `page://self/article`)
-- `#[Tool]` attribute for metadata customization (name, description)
+- `#[Tool]` attribute for metadata customization (name, description, confirm)
+- `#[Tool(confirm: true)]` requires user confirmation before tool execution
 - `#[Exclude]` attribute to exclude methods/classes from tool exposure (opt-out)
 - Supports BEAR\Resource\Annotation\JsonSchema for parameter validation
 
@@ -85,8 +87,10 @@ composer tests    # cs + sa + test
 
 ## Testing
 
+- 100% code coverage is mandatory
 - Fake implementations in `tests/Fake/`
 - `FakeLlmClient` simulates LLM responses
+- `FakeConfirmationHandler` simulates user confirmation
 - Fake resource classes in `tests/Fake/Resource/App/`
 
 ## Key Type Definitions
@@ -111,6 +115,25 @@ The agent loop automatically feeds tool execution errors back to the LLM:
 3. **Unknown tools**: Tool not found in `ToolRegistry` → `ToolResult::error()` with `"Unknown tool: {name}"` format
 
 Error results are sent back to the LLM as `tool_result` messages with `is_error: true`, allowing the LLM to retry or respond appropriately. The error status threshold (400) is defined as a private constant in `Dispatcher`.
+
+## Human-in-the-Loop Confirmation
+
+The agent supports user confirmation before executing destructive tool calls.
+
+### How it works
+
+1. `#[Tool(confirm: true)]` marks tools as confirmable (class or method level)
+2. `SchemaConverter::resolveConfirm()` reads confirm flag (explicit method confirm takes priority, unset falls back to class)
+3. `Schema\Tool::$confirm` stores the flag (included in `jsonSerialize()` as `confirm: true` only when true)
+4. `Agent::isCancelled()` checks if tool requires confirmation and calls `ConfirmationHandlerInterface`
+5. On cancellation, `ToolResult::error()` sends `"User cancelled this operation."` back to LLM
+
+### Key design decisions
+
+- `ConfirmationHandlerInterface` is user-implemented (like `LlmClientInterface`)
+- LLM's text response serves as the confirmation message (no templates needed)
+- If no handler is bound, confirmable tools execute normally (no blocking)
+- The `confirm` property is serialized to JSON only when `true` (omitted when `false`)
 
 ## Notes
 

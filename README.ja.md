@@ -193,6 +193,77 @@ use BEAR\ToolUse\Attribute\Tool;
 public function onGet(string $query): static { /* ... */ }
 ```
 
+## Human-in-the-Loop 確認
+
+`confirm: true` を指定すると、破壊的なツール呼び出しの実行前にユーザーの確認を求めます。
+
+### 確認が必要なツールの指定
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// クラスレベル - 全メソッドで確認が必要
+#[Tool(confirm: true)]
+class User extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+    public function onDelete(int $id): static { /* ... */ }
+}
+
+// メソッドレベル - 特定のメソッドのみ確認が必要
+class Article extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+
+    #[Tool(confirm: true)]
+    public function onDelete(int $id): static { /* ... */ }
+}
+```
+
+### 確認ハンドラーの実装
+
+```php
+use BEAR\ToolUse\Runtime\ConfirmationHandlerInterface;
+use BEAR\ToolUse\Dispatch\ToolCall;
+
+final class CliConfirmationHandler implements ConfirmationHandlerInterface
+{
+    public function confirm(ToolCall $toolCall, string $llmText): bool
+    {
+        echo $llmText . "\n実行しますか？ [Y/n]: ";
+
+        $line = fgets(STDIN);
+
+        return $line !== false && trim($line) !== 'n';
+    }
+}
+```
+
+### DIモジュールでのバインド
+
+```php
+$this->bind(ConfirmationHandlerInterface::class)->to(CliConfirmationHandler::class);
+```
+
+### 動作の仕組み
+
+LLMのテキストレスポンスが確認メッセージとして使われます。テンプレートは不要です。
+
+```text
+ユーザー: 「記事123を削除して」
+  ↓
+LLM: 「記事ID 123「BEAR.Sundayの紹介」を削除します。」
+     tool_use: article_delete({id: 123})
+  ↓
+ConfirmationHandler: 「記事ID 123「BEAR.Sundayの紹介」を削除します。」
+                     実行しますか？ [Y/n]:
+  ↓
+Y → ツール実行
+N → "User cancelled this operation." → LLM: 「承知しました。」
+```
+
+`ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。
+
 ## JSON Schemaの統合
 
 BEAR.ResourceのJSON Schemaを使用してパラメータ定義を強化できます。
@@ -338,6 +409,7 @@ Dispatcherが検出するエラー:
 | `SchemaConverterInterface` | リソースからツール定義への変換 |
 | `ToolCollectorInterface` | ツールの収集と登録 |
 | `AgentInterface` | エージェントランタイム |
+| `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
 
 ### 主要クラス
 

@@ -9,6 +9,7 @@ use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
+use BEAR\ToolUse\Fake\FakeConfirmationHandler;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Schema\SchemaConverter;
 use BEAR\ToolUse\Schema\ToolCollector;
@@ -94,5 +95,31 @@ final class AgentFactoryTest extends TestCase
 
         $tools = $this->factory->getTools();
         $this->assertCount(2, $tools);
+    }
+
+    public function testCreateAgentWithConfirmationHandler(): void
+    {
+        $confirmationHandler = new FakeConfirmationHandler();
+        $injector            = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource            = $injector->getInstance(ResourceInterface::class);
+        $resourceFactory     = $injector->getInstance(FactoryInterface::class);
+
+        $registry  = new ToolRegistry();
+        $converter = new SchemaConverter(DocBlockFactory::createInstance());
+        $collector = new ToolCollector($converter, $registry, $resourceFactory);
+        $dispatcher = new Dispatcher($resource, $registry);
+
+        $factory = new AgentFactory($this->llmClient, $dispatcher, $collector, $registry, $confirmationHandler);
+        $factory->addResources(['app://self/article']);
+
+        $this->llmClient->queueToolUseWithTextResponse('call_1', 'article_get', ['id' => 1], 'Getting article 1.');
+        $this->llmClient->queueTextResponse('Done.');
+
+        $agent    = $factory->create('You are a helpful assistant.');
+        $response = $agent->run('Get article 1');
+
+        $this->assertTrue($response->completed);
+        // article_get has confirm: false, so handler should NOT be called
+        $this->assertEmpty($confirmationHandler->calls);
     }
 }
