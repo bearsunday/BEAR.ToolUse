@@ -36,6 +36,7 @@ src/
 │   ├── Agent.php        # Agent loop
 │   ├── AgentFactory.php # Agent builder
 │   ├── AgentResponse.php
+│   ├── ConfirmationHandlerInterface.php # User confirmation
 │   └── Message.php
 ├── Llm/                 # LLM related
 │   ├── LlmClientInterface.php  # User implementation
@@ -67,7 +68,8 @@ composer tests    # cs + sa + test
 ### BEAR.Sunday Integration
 
 - Expose resource classes as tools via full URI (`app://self/user`, `page://self/article`)
-- `#[Tool]` attribute for metadata customization (name, description)
+- `#[Tool]` attribute for metadata customization (name, description, confirm)
+- `#[Tool(confirm: true)]` requires user confirmation before tool execution
 - `#[Exclude]` attribute to exclude methods/classes from tool exposure (opt-out)
 - Supports BEAR\Resource\Annotation\JsonSchema for parameter validation
 
@@ -85,8 +87,10 @@ composer tests    # cs + sa + test
 
 ## Testing
 
+- 100% code coverage is mandatory
 - Fake implementations in `tests/Fake/`
 - `FakeLlmClient` simulates LLM responses
+- `FakeConfirmationHandler` simulates user confirmation
 - Fake resource classes in `tests/Fake/Resource/App/`
 
 ## Key Type Definitions
@@ -116,9 +120,11 @@ Error results are sent back to the LLM as `tool_result` messages with `is_error:
 
 ### Parameter Description Resolution Priority
 
-1. JSON Schema (`#[JsonSchema(params: '...')]` from BEAR.Resource)
-2. ALPS dictionary (`koriym/app-state-diagram` Profile API)
-3. PHPDoc `@param` via reflection
+1. JSON Schema (`#[JsonSchema(params: '...')]` from BEAR.Resource) — resolved in `SchemaConverter::mergeJsonSchemaProperties()`
+2. PHPDoc `@param` via reflection — resolved in `ParameterDescriptionResolver::resolve()`
+3. ALPS dictionary (`koriym/app-state-diagram` Profile API) — resolved in `ParameterDescriptionResolver::resolve()`
+
+JSON Schema descriptions (with constraints like enum, format, min/max) are handled by `SchemaConverter` before calling the resolver. The resolver handles only PHPDoc (method-specific) and ALPS (application-wide fallback).
 
 ### JSON Schema Integration
 

@@ -277,9 +277,9 @@ The `title` or `doc.value` from ALPS `semantic` descriptors will be used as para
 
 When multiple sources provide descriptions, they are resolved in this order:
 
-1. **JSON Schema** - `description` property from schema file
-2. **ALPS** - `title` or `doc.value` from semantic descriptor
-3. **PHPDoc** - `@param` tag description
+1. **JSON Schema** - `description` property from schema file (+ constraints like `enum`, `format`, `min/max`)
+2. **PHPDoc** - `@param` tag description (method-specific)
+3. **ALPS** - `title` or `doc.value` from semantic descriptor (application-wide fallback)
 
 ## Architecture
 

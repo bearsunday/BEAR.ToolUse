@@ -277,9 +277,9 @@ ALPSプロファイルの`semantic`記述子から`title`または`doc.value`が
 
 複数のソースが説明を提供する場合、以下の順序で解決されます：
 
-1. **JSON Schema** - スキーマファイルの`description`プロパティ
-2. **ALPS** - セマンティック記述子の`title`または`doc.value`
-3. **PHPDoc** - `@param`タグの説明
+1. **JSON Schema** - スキーマファイルの`description`プロパティ（+ `enum`、`format`、`min/max`等の制約）
+2. **PHPDoc** - `@param`タグの説明（メソッド固有）
+3. **ALPS** - セマンティック記述子の`title`または`doc.value`（アプリケーション全体のフォールバック）
 
 ## アーキテクチャ
 
