@@ -87,6 +87,7 @@ composer tests    # cs + sa + test
 
 ## Testing
 
+- 100% code coverage is mandatory
 - Fake implementations in `tests/Fake/`
 - `FakeLlmClient` simulates LLM responses
 - `FakeConfirmationHandler` simulates user confirmation
