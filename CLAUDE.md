@@ -139,9 +139,11 @@ The agent supports user confirmation before executing destructive tool calls.
 
 ### Parameter Description Resolution Priority
 
-1. JSON Schema (`#[JsonSchema(params: '...')]` from BEAR.Resource)
-2. ALPS dictionary (`koriym/app-state-diagram` Profile API)
-3. PHPDoc `@param` via reflection
+1. JSON Schema (`#[JsonSchema(params: '...')]` from BEAR.Resource) — resolved in `SchemaConverter::mergeJsonSchemaProperties()`
+2. PHPDoc `@param` via reflection — resolved in `ParameterDescriptionResolver::resolve()`
+3. ALPS dictionary (`koriym/app-state-diagram` Profile API) — resolved in `ParameterDescriptionResolver::resolve()`
+
+JSON Schema descriptions (with constraints like enum, format, min/max) are handled by `SchemaConverter` before calling the resolver. The resolver handles only PHPDoc (method-specific) and ALPS (application-wide fallback).
 
 ### JSON Schema Integration
 

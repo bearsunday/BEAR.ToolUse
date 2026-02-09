@@ -8,7 +8,6 @@ use BEAR\ToolUse\Fake\Resource\App\FakeDocParamResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeEmptyDocResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeJsonSchemaResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeMissingParamDocResource;
-use BEAR\ToolUse\Fake\Resource\App\FakeNoDescriptionResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeSnakeCaseResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeUserResource;
 use Koriym\AppStateDiagram\LabelNameTitle;
@@ -21,20 +20,18 @@ use ReflectionClass;
 #[CoversClass(ParameterDescriptionResolver::class)]
 final class ParameterDescriptionResolverTest extends TestCase
 {
-    public function testResolveFromJsonSchema(): void
+    public function testResolveFromPhpDoc(): void
     {
         $docBlockFactory = DocBlockFactory::createInstance();
-        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
-        $resolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository);
+        $resolver = new ParameterDescriptionResolver($docBlockFactory);
 
-        $reflection = new ReflectionClass(FakeJsonSchemaResource::class);
+        $reflection = new ReflectionClass(FakeDocParamResource::class);
         $method = $reflection->getMethod('onGet');
         $param = $method->getParameters()[0]; // id
 
-        $jsonSchema = $jsonSchemaRepository->getParameterSchema(FakeJsonSchemaResource::class, 'onGet');
-        $description = $resolver->resolve($param, $jsonSchema);
+        $description = $resolver->resolve($param);
 
-        $this->assertSame('User ID (1-1000)', $description);
+        $this->assertSame('The unique identifier', $description);
     }
 
     public function testResolveFromAlpsDictionary(): void
@@ -49,43 +46,28 @@ final class ParameterDescriptionResolverTest extends TestCase
         $method = $reflection->getMethod('onGet');
         $param = $method->getParameters()[0]; // userId
 
-        $description = $resolver->resolve($param, null);
+        $description = $resolver->resolve($param);
 
         $this->assertSame('User identifier', $description);
     }
 
-    public function testResolveFromPhpDoc(): void
-    {
-        $docBlockFactory = DocBlockFactory::createInstance();
-        $resolver = new ParameterDescriptionResolver($docBlockFactory);
-
-        $reflection = new ReflectionClass(FakeDocParamResource::class);
-        $method = $reflection->getMethod('onGet');
-        $param = $method->getParameters()[0]; // id
-
-        $description = $resolver->resolve($param, null);
-
-        $this->assertSame('The unique identifier', $description);
-    }
-
-    public function testJsonSchemaTakesPriorityOverAlps(): void
+    public function testPhpDocTakesPriorityOverAlps(): void
     {
         $docBlockFactory = DocBlockFactory::createInstance();
         $profilePath = __DIR__ . '/../Fake/alps-profile.json';
         $profile = new Profile($profilePath, new LabelNameTitle());
         $dictionary = new AlpsSemanticDictionary($profile);
-        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
-        $resolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository, $dictionary);
+        $resolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
 
-        $reflection = new ReflectionClass(FakeJsonSchemaResource::class);
+        // FakeDocParamResource has @param for "id", ALPS also has "id" descriptor
+        $reflection = new ReflectionClass(FakeDocParamResource::class);
         $method = $reflection->getMethod('onGet');
         $param = $method->getParameters()[0]; // id
 
-        $jsonSchema = $jsonSchemaRepository->getParameterSchema(FakeJsonSchemaResource::class, 'onGet');
-        $description = $resolver->resolve($param, $jsonSchema);
+        $description = $resolver->resolve($param);
 
-        // JSON Schema description should be used
-        $this->assertSame('User ID (1-1000)', $description);
+        // PHPDoc description should be used over ALPS
+        $this->assertSame('The unique identifier', $description);
     }
 
     public function testSnakeCaseToCamelCaseForAlps(): void
@@ -100,7 +82,7 @@ final class ParameterDescriptionResolverTest extends TestCase
         $method = $reflection->getMethod('onGet');
         $param = $method->getParameters()[0]; // user_id
 
-        $description = $resolver->resolve($param, null);
+        $description = $resolver->resolve($param);
 
         // user_id should be converted to userId for ALPS lookup
         $this->assertSame('User identifier', $description);
@@ -115,7 +97,7 @@ final class ParameterDescriptionResolverTest extends TestCase
         $method = $reflection->getMethod('onPost');
         $param = $method->getParameters()[1]; // email - no description
 
-        $description = $resolver->resolve($param, null);
+        $description = $resolver->resolve($param);
 
         $this->assertNull($description);
     }
@@ -151,7 +133,7 @@ final class ParameterDescriptionResolverTest extends TestCase
         $method = $reflection->getMethod('onGet');
         $param = $method->getParameters()[0]; // id with empty description
 
-        $description = $resolver->resolve($param, null);
+        $description = $resolver->resolve($param);
 
         $this->assertNull($description);
     }
@@ -165,7 +147,7 @@ final class ParameterDescriptionResolverTest extends TestCase
         $method = $reflection->getMethod('onGet');
         $param = $method->getParameters()[1]; // name (second parameter)
 
-        $description = $resolver->resolve($param, null);
+        $description = $resolver->resolve($param);
 
         // Should skip the first @param (id) and find the second one (name)
         $this->assertSame('The display name for this item', $description);
@@ -180,25 +162,26 @@ final class ParameterDescriptionResolverTest extends TestCase
         $method = $reflection->getMethod('onGet');
         $param = $method->getParameters()[1]; // name (not documented in PHPDoc)
 
-        $description = $resolver->resolve($param, null);
+        $description = $resolver->resolve($param);
 
         $this->assertNull($description);
     }
 
-    public function testReturnsNullWhenJsonSchemaHasNoDescription(): void
+    public function testFallsBackToAlpsWhenNoPhpDoc(): void
     {
         $docBlockFactory = DocBlockFactory::createInstance();
-        $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
-        $resolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository);
+        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
+        $profile = new Profile($profilePath, new LabelNameTitle());
+        $dictionary = new AlpsSemanticDictionary($profile);
+        $resolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
 
-        $reflection = new ReflectionClass(FakeNoDescriptionResource::class);
+        // FakeUserResource::onGet has no PHPDoc, so should fall back to ALPS
+        $reflection = new ReflectionClass(FakeUserResource::class);
         $method = $reflection->getMethod('onGet');
-        $param = $method->getParameters()[0]; // id (has schema but no description)
+        $param = $method->getParameters()[0]; // userId
 
-        $jsonSchema = $jsonSchemaRepository->getParameterSchema(FakeNoDescriptionResource::class, 'onGet');
-        $description = $resolver->resolve($param, $jsonSchema);
+        $description = $resolver->resolve($param);
 
-        // Should return null because JSON Schema property has no description
-        $this->assertNull($description);
+        $this->assertSame('User identifier', $description);
     }
 }

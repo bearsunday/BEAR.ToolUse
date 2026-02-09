@@ -10,14 +10,12 @@ use phpDocumentor\Reflection\DocBlockFactoryInterface;
 use ReflectionMethod;
 use ReflectionParameter;
 
-use function is_array;
-use function is_string;
 use function lcfirst;
 use function str_replace;
 use function ucwords;
 
 /**
- * Resolves parameter descriptions from JSON Schema, ALPS, or PHPDoc
+ * Resolves parameter descriptions from PHPDoc or ALPS
  */
 final readonly class ParameterDescriptionResolver implements ParameterDescriptionResolverInterface
 {
@@ -29,39 +27,18 @@ final readonly class ParameterDescriptionResolver implements ParameterDescriptio
     }
 
     #[Override]
-    public function resolve(ReflectionParameter $param, array|null $jsonSchema): string|null
+    public function resolve(ReflectionParameter $param): string|null
     {
         $paramName = $param->getName();
 
-        // 1. JSON Schema (highest priority)
-        $jsonSchemaDescription = $this->getJsonSchemaDescription($paramName, $jsonSchema);
-        if ($jsonSchemaDescription !== null) {
-            return $jsonSchemaDescription;
+        // 1. PHPDoc (highest priority - method-specific)
+        $phpDocDescription = $this->getPhpDocDescription($param, $paramName);
+        if ($phpDocDescription !== null) {
+            return $phpDocDescription;
         }
 
-        // 2. ALPS Dictionary
-        $alpsDescription = $this->getAlpsDictionaryDescription($paramName);
-        if ($alpsDescription !== null) {
-            return $alpsDescription;
-        }
-
-        // 3. PHPDoc (lowest priority)
-        return $this->getPhpDocDescription($param, $paramName);
-    }
-
-    /** @param array<string, mixed>|null $jsonSchema */
-    private function getJsonSchemaDescription(string $paramName, array|null $jsonSchema): string|null
-    {
-        if ($jsonSchema === null) {
-            return null;
-        }
-
-        $paramSchema = $jsonSchema[$paramName] ?? null;
-        if (! is_array($paramSchema) || ! isset($paramSchema['description']) || ! is_string($paramSchema['description'])) {
-            return null;
-        }
-
-        return $paramSchema['description'];
+        // 2. ALPS Dictionary (fallback - application-wide)
+        return $this->getAlpsDictionaryDescription($paramName);
     }
 
     private function getAlpsDictionaryDescription(string $paramName): string|null

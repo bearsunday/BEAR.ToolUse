@@ -180,7 +180,7 @@ final readonly class SchemaConverter implements SchemaConverterInterface
 
         // Add description if not already set by JSON Schema
         if (! isset($schema['description']) && $this->descriptionResolver !== null) {
-            $description = $this->descriptionResolver->resolve($param, $jsonSchema);
+            $description = $this->descriptionResolver->resolve($param);
             if ($description !== null) {
                 $schema['description'] = $description;
             }

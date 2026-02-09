@@ -7,15 +7,14 @@ namespace BEAR\ToolUse\Schema;
 use ReflectionParameter;
 
 /**
- * Resolves parameter descriptions from various sources
+ * Resolves parameter descriptions from PHPDoc or ALPS
  */
 interface ParameterDescriptionResolverInterface
 {
     /**
      * Get description for a parameter
      *
-     * @param ReflectionParameter       $param      Parameter to get description for
-     * @param array<string, mixed>|null $jsonSchema JSON Schema properties
+     * @param ReflectionParameter $param Parameter to get description for
      */
-    public function resolve(ReflectionParameter $param, array|null $jsonSchema): string|null;
+    public function resolve(ReflectionParameter $param): string|null;
 }
