@@ -6,6 +6,7 @@ namespace BEAR\ToolUse\Schema;
 
 use BEAR\ToolUse\Fake\Resource\App\FakeArticleResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeConfirmableResource;
+use BEAR\ToolUse\Fake\Resource\App\FakeConfirmInheritResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeMethodConfirmResource;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -45,6 +46,9 @@ final class SchemaConverterConfirmTest extends TestCase
         $getIndex = array_search('method_confirm_get', $toolNames, true);
         $deleteIndex = array_search('method_confirm_delete', $toolNames, true);
 
+        $this->assertNotFalse($getIndex);
+        $this->assertNotFalse($deleteIndex);
+
         // onGet has no confirm attribute → false
         $this->assertFalse($tools[$getIndex]->confirm);
         // onDelete has #[Tool(confirm: true)] → true
@@ -67,6 +71,24 @@ final class SchemaConverterConfirmTest extends TestCase
         $decoded = json_decode((string) $json, true);
 
         $this->assertTrue($decoded['confirm']);
+    }
+
+    public function testMethodAttributeWithoutConfirmInheritsClassConfirm(): void
+    {
+        $tools = $this->converter->convert(FakeConfirmInheritResource::class, '/confirm-inherit');
+
+        $toolNames = array_map(static fn (Tool $t) => $t->name, $tools);
+
+        $customGetIndex = array_search('custom_get', $toolNames, true);
+        $deleteIndex = array_search('confirm_inherit_delete', $toolNames, true);
+
+        $this->assertNotFalse($customGetIndex);
+        $this->assertNotFalse($deleteIndex);
+
+        // Method #[Tool(name: 'custom_get')] without confirm → inherits class confirm: true
+        $this->assertTrue($tools[$customGetIndex]->confirm);
+        // No method attribute → inherits class confirm: true
+        $this->assertTrue($tools[$deleteIndex]->confirm);
     }
 
     public function testConfirmFalseOmittedFromJson(): void

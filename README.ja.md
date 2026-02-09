@@ -232,7 +232,9 @@ final class CliConfirmationHandler implements ConfirmationHandlerInterface
     {
         echo $llmText . "\n実行しますか？ [Y/n]: ";
 
-        return trim(fgets(STDIN)) !== 'n';
+        $line = fgets(STDIN);
+
+        return $line !== false && trim($line) !== 'n';
     }
 }
 ```
@@ -247,7 +249,7 @@ $this->bind(ConfirmationHandlerInterface::class)->to(CliConfirmationHandler::cla
 
 LLMのテキストレスポンスが確認メッセージとして使われます。テンプレートは不要です。
 
-```
+```text
 ユーザー: 「記事123を削除して」
   ↓
 LLM: 「記事ID 123「BEAR.Sundayの紹介」を削除します。」
