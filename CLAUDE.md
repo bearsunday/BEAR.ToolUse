@@ -123,7 +123,7 @@ The agent supports user confirmation before executing destructive tool calls.
 ### How it works
 
 1. `#[Tool(confirm: true)]` marks tools as confirmable (class or method level)
-2. `SchemaConverter::resolveConfirm()` reads confirm flag (method attribute takes priority over class)
+2. `SchemaConverter::resolveConfirm()` reads confirm flag (explicit method confirm takes priority, unset falls back to class)
 3. `Schema\Tool::$confirm` stores the flag (included in `jsonSerialize()` as `confirm: true` only when true)
 4. `Agent::isCancelled()` checks if tool requires confirmation and calls `ConfirmationHandlerInterface`
 5. On cancellation, `ToolResult::error()` sends `"User cancelled this operation."` back to LLM
