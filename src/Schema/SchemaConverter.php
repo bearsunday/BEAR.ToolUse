@@ -94,7 +94,10 @@ final readonly class SchemaConverter implements SchemaConverterInterface
 
     private function resolveConfirm(ToolAttribute|null $classAttribute, ToolAttribute|null $methodAttribute): bool
     {
-        return $methodAttribute?->confirm ?? $classAttribute?->confirm ?? false;
+        $confirm = $methodAttribute?->confirm;
+        $confirm ??= $classAttribute?->confirm;
+
+        return $confirm ?? false;
     }
 
     private function buildToolName(string $resourcePath, string $httpMethod, ToolAttribute|null $attribute): string
