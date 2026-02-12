@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Schema;
 use ArrayObject;
 use Koriym\AppStateDiagram\Profile;
 use Koriym\AppStateDiagram\SemanticDescriptor;
+use stdClass;
 
 use function is_string;
 
@@ -42,9 +43,13 @@ final class AlpsSemanticDictionary extends ArrayObject
             return $descriptor->title;
         }
 
-        // koriym/app-state-diagram extracts doc.value and stores it as a string
+        // v0.17+ stores doc as string, v0.8 stores as stdClass with value property
         if (is_string($descriptor->doc) && $descriptor->doc !== '') {
             return $descriptor->doc;
+        }
+
+        if ($descriptor->doc instanceof stdClass && isset($descriptor->doc->value)) {
+            return (string) $descriptor->doc->value;
         }
 
         return null;
