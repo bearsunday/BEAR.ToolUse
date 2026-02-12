@@ -11,13 +11,14 @@ A library that enables AI agent capabilities for BEAR.Sunday applications. Autom
 ```
 src/
 ├── Attribute/           # PHP Attributes
-│   ├── Tool.php         # Tool metadata (name, description, confirm)
+│   ├── Tool.php         # Tool metadata (name, description, confirm, filter)
 │   └── Exclude.php      # Exclude from tool exposure
 ├── Dispatch/            # Tool execution
 │   ├── DispatcherInterface.php
 │   ├── Dispatcher.php   # Dispatch to BEAR.Resource
 │   ├── ToolRegistryInterface.php
 │   ├── ToolRegistry.php # Tool name → resource mapping
+│   ├── ToolResultFilterInterface.php # Response filter
 │   ├── ToolCall.php     # Call from LLM
 │   └── ToolResult.php   # Execution result
 ├── Schema/              # Schema conversion
@@ -68,8 +69,9 @@ composer tests    # cs + sa + test
 ### BEAR.Sunday Integration
 
 - Expose resource classes as tools via full URI (`app://self/user`, `page://self/article`)
-- `#[Tool]` attribute for metadata customization (name, description, confirm)
+- `#[Tool]` attribute for metadata customization (name, description, confirm, filter)
 - `#[Tool(confirm: true)]` requires user confirmation before tool execution
+- `#[Tool(filter: FilterClass::class)]` filters response body before sending to LLM
 - `#[Exclude]` attribute to exclude methods/classes from tool exposure (opt-out)
 - Supports BEAR\Resource\Annotation\JsonSchema for parameter validation
 
@@ -97,7 +99,7 @@ composer tests    # cs + sa + test
 
 ```php
 // Tool mapping
-@psalm-type ToolMapping = array{resourceUri: string, method: string}
+@psalm-type ToolMapping = array{resourceUri: string, method: string, filter?: class-string<ToolResultFilterInterface>}
 
 // Message content
 @psalm-type ContentBlock = array{type: string, text?: string, id?: string, name?: string, input?: array<string, mixed>}
@@ -134,6 +136,26 @@ The agent supports user confirmation before executing destructive tool calls.
 - LLM's text response serves as the confirmation message (no templates needed)
 - If no handler is bound, confirmable tools execute normally (no blocking)
 - The `confirm` property is serialized to JSON only when `true` (omitted when `false`)
+
+## Response Filtering
+
+Filter tool response bodies before sending to LLM to reduce token usage.
+
+### How it works
+
+1. `#[Tool(filter: FilterClass::class)]` specifies a filter (class or method level)
+2. `SchemaConverter::resolveFilter()` reads filter class (explicit method filter takes priority, unset falls back to class)
+3. `Schema\Tool::$filter` stores the class-string (excluded from `jsonSerialize()`)
+4. `ToolCollector` passes `$filter` to `ToolRegistry::register()`
+5. `Dispatcher` applies filter on success responses only (errors are not filtered)
+
+### Key design decisions
+
+- Filter class implements `ToolResultFilterInterface` with `__invoke(mixed $body): mixed`
+- Filters are pure data transformers instantiated via `new` (no DI needed)
+- Filter exceptions are caught by the existing `Throwable` catch and fed back to LLM
+- The `filter` property is not serialized to JSON (internal use only)
+- `ToolMapping`'s `filter` key is optional (omitted when no filter is set)
 
 ## Notes
 

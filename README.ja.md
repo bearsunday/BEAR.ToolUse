@@ -264,6 +264,54 @@ N → "User cancelled this operation." → LLM: 「承知しました。」
 
 `ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。
 
+## レスポンスフィルタリング
+
+`filter` を使用して、LLMに送信する前にレスポンスボディを削減できます。大量のデータを返すリソースでトークン効率を改善します。
+
+### フィルタの定義
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
+use Override;
+
+final readonly class SummaryFilter implements ToolResultFilterInterface
+{
+    #[Override]
+    public function __invoke(mixed $body): mixed
+    {
+        // LLMに必要なフィールドだけを抽出
+        return array_map(fn (array $item) => [
+            'id' => $item['id'],
+            'title' => $item['title'],
+        ], $body);
+    }
+}
+```
+
+### リソースへの適用
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// クラスレベル - 全メソッドでフィルタを使用
+#[Tool(filter: SummaryFilter::class)]
+class Search extends ResourceObject
+{
+    public function onGet(string $query): static { /* ... */ }
+}
+
+// メソッドレベル - 特定のメソッドのみフィルタを使用
+class Article extends ResourceObject
+{
+    #[Tool(filter: SummaryFilter::class)]
+    public function onGet(string $query): static { /* ... */ }
+
+    public function onPost(string $title, string $body): static { /* ... */ }
+}
+```
+
+フィルタは成功レスポンスにのみ適用されます。エラーレスポンス（ステータスコード >= 400）はフィルタされずにそのまま送信されます。
+
 ## JSON Schemaの統合
 
 BEAR.ResourceのJSON Schemaを使用してパラメータ定義を強化できます。
@@ -409,6 +457,7 @@ Dispatcherが検出するエラー:
 | `SchemaConverterInterface` | リソースからツール定義への変換 |
 | `ToolCollectorInterface` | ツールの収集と登録 |
 | `AgentInterface` | エージェントランタイム |
+| `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
 | `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
 
 ### 主要クラス
