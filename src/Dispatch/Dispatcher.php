@@ -48,14 +48,25 @@ final readonly class Dispatcher implements DispatcherInterface
                 $toolCall->input,
             );
 
-            $content = json_encode($ro->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
             if ($ro->code >= self::ERROR_STATUS_THRESHOLD) {
+                $content = json_encode($ro->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
                 return ToolResult::error(
                     $toolCall->id,
                     sprintf('%d: %s', $ro->code, $content),
                 );
             }
+
+            /** @var mixed $body */
+            $body = $ro->body;
+            if (isset($mapping['filter'])) {
+                /** @var class-string<ToolResultFilterInterface> $filterClass */
+                $filterClass = $mapping['filter'];
+                /** @var mixed $body */
+                $body = (new $filterClass())($body);
+            }
+
+            $content = json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
             return ToolResult::success($toolCall->id, $content);
         } catch (Throwable $e) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Attribute;
 
 use Attribute;
+use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
 
 /**
  * Defines tool metadata for AI agents
@@ -19,6 +20,8 @@ final class Tool
         public string|null $name = null,
         public string|null $description = null,
         public bool|null $confirm = null,
+        /** @var class-string<ToolResultFilterInterface>|null */
+        public string|null $filter = null,
     ) {
     }
 }

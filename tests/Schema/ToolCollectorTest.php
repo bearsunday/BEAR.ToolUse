@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Schema;
 use BEAR\Resource\FactoryInterface;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
+use BEAR\ToolUse\Fake\FakeSummaryFilter;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -113,5 +114,14 @@ final class ToolCollectorTest extends TestCase
         $mapping = $this->registry->get('article_get');
         $this->assertNotNull($mapping);
         $this->assertSame('page://self/article', $mapping['resourceUri']);
+    }
+
+    public function testFilterPropagatedToRegistry(): void
+    {
+        $this->collector->collect(['app://self/filtered']);
+
+        $mapping = $this->registry->get('filtered_get');
+        $this->assertNotNull($mapping);
+        $this->assertSame(FakeSummaryFilter::class, $mapping['filter']);
     }
 }

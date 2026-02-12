@@ -63,7 +63,7 @@ final readonly class ToolCollector implements ToolCollectorInterface
 
         foreach ($tools as $tool) {
             $method = $this->extractMethodFromToolName($tool->name, $resourcePath);
-            $this->registry->register($tool->name, $uri, $method);
+            $this->registry->register($tool->name, $uri, $method, $tool->filter);
         }
 
         return $tools;

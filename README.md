@@ -264,6 +264,54 @@ N → "User cancelled this operation." → LLM: "Understood."
 
 If no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking).
 
+## Response Filtering
+
+Use `filter` to reduce the response body before sending to the LLM. This improves token efficiency for resources returning large payloads.
+
+### Define a Filter
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
+use Override;
+
+final readonly class SummaryFilter implements ToolResultFilterInterface
+{
+    #[Override]
+    public function __invoke(mixed $body): mixed
+    {
+        // Extract only the fields the LLM needs
+        return array_map(fn (array $item) => [
+            'id' => $item['id'],
+            'title' => $item['title'],
+        ], $body);
+    }
+}
+```
+
+### Apply to Resource
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// Class level - all methods use the filter
+#[Tool(filter: SummaryFilter::class)]
+class Search extends ResourceObject
+{
+    public function onGet(string $query): static { /* ... */ }
+}
+
+// Method level - only specific methods use the filter
+class Article extends ResourceObject
+{
+    #[Tool(filter: SummaryFilter::class)]
+    public function onGet(string $query): static { /* ... */ }
+
+    public function onPost(string $title, string $body): static { /* ... */ }
+}
+```
+
+Filters are only applied to success responses. Error responses (status code >= 400) are sent unfiltered.
+
 ## JSON Schema Integration
 
 Use BEAR.Resource's JSON Schema for enhanced parameter definitions.
@@ -409,6 +457,7 @@ Errors detected by the Dispatcher:
 | `SchemaConverterInterface` | Converts resources to tool definitions |
 | `ToolCollectorInterface` | Collects and registers tools |
 | `AgentInterface` | Agent runtime |
+| `ToolResultFilterInterface` | Response filter before sending to LLM |
 | `ConfirmationHandlerInterface` | User confirmation for destructive tools |
 
 ### Main Classes
