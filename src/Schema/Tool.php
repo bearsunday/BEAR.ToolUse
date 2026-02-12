@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Schema;
 
+use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
 use JsonSerializable;
 use Override;
 
@@ -21,6 +22,8 @@ final readonly class Tool implements JsonSerializable
         public string $description,
         public array $inputSchema,
         public bool $confirm = false,
+        /** @var class-string<ToolResultFilterInterface>|null */
+        public string|null $filter = null,
     ) {
     }
 
