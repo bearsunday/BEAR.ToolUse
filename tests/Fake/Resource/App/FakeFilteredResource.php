@@ -8,9 +8,9 @@ use BEAR\Resource\ResourceObject;
 use BEAR\ToolUse\Attribute\Tool;
 use BEAR\ToolUse\Fake\FakeSummaryFilter;
 
-#[Tool(filter: FakeSummaryFilter::class)]
 class FakeFilteredResource extends ResourceObject
 {
+    #[Tool(filter: FakeSummaryFilter::class)]
     public function onGet(int $id): static
     {
         $this->body = [

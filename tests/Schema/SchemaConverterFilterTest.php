@@ -9,6 +9,7 @@ use BEAR\ToolUse\Fake\Resource\App\FakeArticleResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeFilteredResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeFilterInheritResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeMethodFilterResource;
+use BEAR\ToolUse\Fake\Resource\App\Filtered;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -30,12 +31,10 @@ final class SchemaConverterFilterTest extends TestCase
 
     public function testClassLevelFilter(): void
     {
-        $tools = $this->converter->convert(FakeFilteredResource::class, '/filtered');
+        $tools = $this->converter->convert(Filtered::class, '/filtered');
 
-        $this->assertCount(2, $tools);
-        foreach ($tools as $tool) {
-            $this->assertSame(FakeSummaryFilter::class, $tool->filter);
-        }
+        $this->assertCount(1, $tools);
+        $this->assertSame(FakeSummaryFilter::class, $tools[0]->filter);
     }
 
     public function testMethodLevelFilter(): void
