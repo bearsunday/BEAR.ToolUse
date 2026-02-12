@@ -105,7 +105,10 @@ final readonly class SchemaConverter implements SchemaConverterInterface
     /** @return class-string<ToolResultFilterInterface>|null */
     private function resolveFilter(ToolAttribute|null $classAttribute, ToolAttribute|null $methodAttribute): string|null
     {
-        return $methodAttribute?->filter ?? $classAttribute?->filter;
+        $filter = $methodAttribute?->filter;
+        $filter ??= $classAttribute?->filter;
+
+        return $filter;
     }
 
     private function buildToolName(string $resourcePath, string $httpMethod, ToolAttribute|null $attribute): string
