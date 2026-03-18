@@ -26,10 +26,14 @@
         <PossiblyUnusedProperty errorLevel="suppress"/>
         <PossiblyUnusedReturnValue errorLevel="suppress"/>
 
+        <!-- Override polyfill for PHP 8.2 target -->
+        <InvalidAttribute errorLevel="suppress"/>
+
         <!-- Mixed content for AgentResponse -->
         <MixedAssignment>
             <errorLevel type="suppress">
                 <file name="src/Runtime/AgentResponse.php"/>
+                <file name="src/Runtime/StreamingAgent.php"/>
             </errorLevel>
         </MixedAssignment>
 
