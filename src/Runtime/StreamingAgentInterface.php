@@ -14,7 +14,7 @@ interface StreamingAgentInterface
     /**
      * Run the agent with streaming output
      *
-     * @return Generator<int, AgentEvent, void>
+     * @return Generator<int, AgentEvent, mixed, void>
      */
     public function runStream(string $userMessage): Generator;
 

@@ -35,7 +35,7 @@ class FakeStreamingLlmClient implements StreamingLlmClientInterface
      * @param list<Message> $messages
      * @param list<Tool>    $tools
      *
-     * @return Generator<int, StreamEvent, void>
+     * @return Generator<int, StreamEvent, mixed, void>
      */
     #[Override]
     public function chatStream(string $system, array $messages, array $tools): Generator

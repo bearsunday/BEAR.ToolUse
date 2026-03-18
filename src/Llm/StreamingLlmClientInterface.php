@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Llm;
 
-use Generator;
 use BEAR\ToolUse\Runtime\Message;
 use BEAR\ToolUse\Schema\Tool;
+use Generator;
 
 /**
  * Interface for streaming LLM API clients
  *
- * @psalm-type StreamGenerator = Generator<int, StreamEvent, void>
+ * @psalm-type StreamGenerator = Generator<int, StreamEvent, mixed, void>
  */
 interface StreamingLlmClientInterface
 {
@@ -21,7 +21,7 @@ interface StreamingLlmClientInterface
      * @param list<Message> $messages
      * @param list<Tool>    $tools
      *
-     * @return Generator<int, StreamEvent, void>
+     * @return Generator<int, StreamEvent, mixed, void>
      */
     public function chatStream(
         string $system,

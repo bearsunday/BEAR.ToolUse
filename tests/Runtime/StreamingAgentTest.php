@@ -15,6 +15,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 
+use function array_map;
+use function end;
 use function iterator_to_array;
 use function json_encode;
 
