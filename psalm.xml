@@ -33,7 +33,7 @@
         <MixedAssignment>
             <errorLevel type="suppress">
                 <file name="src/Runtime/AgentResponse.php"/>
-                <file name="src/Runtime/StreamingAgent.php"/>
+                <file name="src/Runtime/StreamContentAccumulator.php"/>
             </errorLevel>
         </MixedAssignment>
 
