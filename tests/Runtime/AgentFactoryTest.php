@@ -11,12 +11,14 @@ use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeConfirmationHandler;
 use BEAR\ToolUse\Fake\FakeLlmClient;
+use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Schema\SchemaConverter;
 use BEAR\ToolUse\Schema\ToolCollector;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
+use RuntimeException;
 
 #[CoversClass(AgentFactory::class)]
 final class AgentFactoryTest extends TestCase
@@ -95,6 +97,34 @@ final class AgentFactoryTest extends TestCase
 
         $tools = $this->factory->getTools();
         $this->assertCount(2, $tools);
+    }
+
+    public function testCreateStreamingAgent(): void
+    {
+        $streamingClient = new FakeStreamingLlmClient();
+        $injector        = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource        = $injector->getInstance(ResourceInterface::class);
+        $resourceFactory = $injector->getInstance(FactoryInterface::class);
+
+        $registry   = new ToolRegistry();
+        $converter  = new SchemaConverter(DocBlockFactory::createInstance());
+        $collector  = new ToolCollector($converter, $registry, $resourceFactory);
+        $dispatcher = new Dispatcher($resource, $registry);
+
+        $factory = new AgentFactory($this->llmClient, $dispatcher, $collector, $registry, null, $streamingClient);
+        $factory->addResources(['app://self/article']);
+
+        $agent = $factory->createStreaming('You are a helpful assistant.', 5);
+
+        $this->assertInstanceOf(StreamingAgent::class, $agent);
+    }
+
+    public function testCreateStreamingAgentThrowsWhenNotConfigured(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('StreamingLlmClientInterface is not configured');
+
+        $this->factory->createStreaming('You are a helpful assistant.');
     }
 
     public function testCreateAgentWithConfirmationHandler(): void

@@ -184,6 +184,84 @@ final class StreamingAgentTest extends TestCase
         self::assertSame('something failed', $event->data['message']);
     }
 
+    public function testOtherStopReason(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Partial']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'max_tokens']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        $lastEvent = end($events);
+        self::assertSame(AgentEvent::COMPLETED, $lastEvent->type);
+        self::assertSame('Partial', $lastEvent->data['fullText']);
+    }
+
+    public function testToolDispatchException(): void
+    {
+        $toolInput = json_encode(['id' => 999]);
+
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'unknown_tool']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Error handled']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Call unknown tool'));
+
+        $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
+        self::assertContains(AgentEvent::TOOL_RESULT, $types);
+        $lastEvent = end($events);
+        self::assertSame(AgentEvent::COMPLETED, $lastEvent->type);
+    }
+
+    public function testNonStringEventData(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 42]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        self::assertSame(AgentEvent::TEXT_DELTA, $events[0]->type);
+        self::assertSame('', $events[0]->data['text']);
+    }
+
+    public function testEmptyContentBlockStop(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        self::assertCount(1, $events);
+        self::assertSame(AgentEvent::COMPLETED, $events[0]->type);
+    }
+
     public function testConversationHistoryPreserved(): void
     {
         $this->llmClient->setEventSequences([
