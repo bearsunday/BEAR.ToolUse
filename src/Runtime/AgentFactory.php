@@ -10,7 +10,6 @@ use BEAR\ToolUse\Llm\LlmClientInterface;
 use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
 use BEAR\ToolUse\Schema\Tool;
 use BEAR\ToolUse\Schema\ToolCollectorInterface;
-use RuntimeException;
 
 /**
  * Factory for creating Agent instances
@@ -68,7 +67,7 @@ final class AgentFactory
     public function createStreaming(string $systemPrompt, int $maxIterations = 10): StreamingAgentInterface
     {
         if ($this->streamingClient === null) {
-            throw new RuntimeException('StreamingLlmClientInterface is not configured');
+            throw new StreamingNotConfiguredException('StreamingLlmClientInterface is not configured');
         }
 
         return new StreamingAgent(

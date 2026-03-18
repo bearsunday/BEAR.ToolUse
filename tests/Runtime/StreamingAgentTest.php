@@ -22,6 +22,7 @@ use function iterator_to_array;
 use function json_encode;
 
 #[CoversClass(StreamingAgent::class)]
+#[CoversClass(StreamIterationState::class)]
 #[CoversClass(AgentEvent::class)]
 #[CoversClass(StreamEvent::class)]
 final class StreamingAgentTest extends TestCase

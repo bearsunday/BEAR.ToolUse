@@ -18,7 +18,6 @@ use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
-use RuntimeException;
 
 #[CoversClass(AgentFactory::class)]
 final class AgentFactoryTest extends TestCase
@@ -121,7 +120,7 @@ final class AgentFactoryTest extends TestCase
 
     public function testCreateStreamingAgentThrowsWhenNotConfigured(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(StreamingNotConfiguredException::class);
         $this->expectExceptionMessage('StreamingLlmClientInterface is not configured');
 
         $this->factory->createStreaming('You are a helpful assistant.');
