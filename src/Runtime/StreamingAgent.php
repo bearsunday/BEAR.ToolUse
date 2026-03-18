@@ -14,7 +14,6 @@ use Generator;
 use Override;
 use Throwable;
 
-use function is_string;
 use function json_decode;
 
 /**
@@ -25,7 +24,6 @@ use function json_decode;
  * Tool calls are executed and results fed back to the LLM.
  *
  * @psalm-import-type PendingToolCall from StreamIterationState
- * @psalm-import-type ContentBlock from StreamIterationState
  */
 final class StreamingAgent implements StreamingAgentInterface
 {
@@ -66,9 +64,7 @@ final class StreamingAgent implements StreamingAgentInterface
             $fullText = $state->fullText;
 
             if ($state->stopReason === 'end_turn') {
-                if ($state->contentBlocks !== []) {
-                    $this->messages[] = Message::assistant($state->contentBlocks);
-                }
+                $this->recordContentBlocks($state);
 
                 yield AgentEvent::completed($fullText);
 
@@ -107,6 +103,15 @@ final class StreamingAgent implements StreamingAgentInterface
         $this->messages = [];
     }
 
+    private function recordContentBlocks(StreamIterationState $state): void
+    {
+        if ($state->contentBlocks === []) {
+            return;
+        }
+
+        $this->messages[] = Message::assistant($state->contentBlocks);
+    }
+
     /**
      * Consume stream events and yield AgentEvents
      *
@@ -116,79 +121,15 @@ final class StreamingAgent implements StreamingAgentInterface
      */
     private function consumeStream(Generator $stream, bool $hadPreviousText, string $fullText): Generator
     {
-        $currentText = '';
-        $needsSeparator = $hadPreviousText;
-        $stopReason = 'end_turn';
-        /** @var list<PendingToolCall> $pendingToolCalls */
-        $pendingToolCalls = [];
-        $currentToolId = '';
-        $currentToolName = '';
-        $currentToolInputJson = '';
-        /** @var list<ContentBlock> $contentBlocks */
-        $contentBlocks = [];
+        $accumulator = new StreamContentAccumulator($hadPreviousText, $fullText);
 
         foreach ($stream as $event) {
-            switch ($event->type) {
-                case StreamEvent::TEXT_DELTA:
-                    $text = $this->eventString($event, 'text');
-                    if ($needsSeparator) {
-                        $fullText .= "\n";
-
-                        yield AgentEvent::textDelta("\n");
-
-                        $needsSeparator = false;
-                    }
-
-                    $currentText .= $text;
-                    $fullText .= $text;
-
-                    yield AgentEvent::textDelta($text);
-
-                    break;
-
-                case StreamEvent::TOOL_USE_START:
-                    $currentToolId = $this->eventString($event, 'id');
-                    $currentToolName = $this->eventString($event, 'name');
-                    $currentToolInputJson = '';
-
-                    yield AgentEvent::toolStart($currentToolName);
-
-                    break;
-
-                case StreamEvent::TOOL_USE_DELTA:
-                    $currentToolInputJson .= $this->eventString($event, 'input');
-
-                    break;
-
-                case StreamEvent::CONTENT_BLOCK_STOP:
-                    $block = $this->buildContentBlock(
-                        $currentToolName,
-                        $currentToolId,
-                        $currentToolInputJson,
-                        $currentText,
-                    );
-                    $pendingToolCalls = [...$pendingToolCalls, ...$block['pendingToolCalls']];
-                    $contentBlocks = [...$contentBlocks, ...$block['contentBlocks']];
-                    $currentToolId = '';
-                    $currentToolName = '';
-                    $currentToolInputJson = '';
-
-                    break;
-
-                case StreamEvent::MESSAGE_STOP:
-                    $stopReason = $this->eventString($event, 'stopReason', 'end_turn');
-
-                    break;
+            foreach ($accumulator->handleEvent($event) as $agentEvent) {
+                yield $agentEvent;
             }
         }
 
-        return new StreamIterationState(
-            stopReason: $stopReason,
-            currentText: $currentText,
-            pendingToolCalls: $pendingToolCalls,
-            contentBlocks: $contentBlocks,
-            fullText: $fullText,
-        );
+        return $accumulator->toState();
     }
 
     /**
@@ -222,44 +163,5 @@ final class StreamingAgent implements StreamingAgentInterface
         }
 
         return $toolResults;
-    }
-
-    /**
-     * Build content block data from accumulated stream state
-     *
-     * @return array{pendingToolCalls: list<PendingToolCall>, contentBlocks: list<ContentBlock>}
-     */
-    private function buildContentBlock(
-        string $toolName,
-        string $toolId,
-        string $toolInputJson,
-        string $currentText,
-    ): array {
-        if ($toolName !== '') {
-            /** @var array<string, mixed> $input */
-            $input = (array) json_decode($toolInputJson, true);
-
-            return [
-                'pendingToolCalls' => [['id' => $toolId, 'name' => $toolName, 'inputJson' => $toolInputJson]],
-                'contentBlocks' => [['type' => 'tool_use', 'id' => $toolId, 'name' => $toolName, 'input' => $input]],
-            ];
-        }
-
-        if ($currentText !== '') {
-            return [
-                'pendingToolCalls' => [],
-                'contentBlocks' => [['type' => 'text', 'text' => $currentText]],
-            ];
-        }
-
-        return ['pendingToolCalls' => [], 'contentBlocks' => []];
-    }
-
-    /** Extract a string value from stream event data */
-    private function eventString(StreamEvent $event, string $key, string $default = ''): string
-    {
-        $value = $event->data[$key] ?? $default;
-
-        return is_string($value) ? $value : $default;
     }
 }
