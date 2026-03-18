@@ -9,6 +9,7 @@ use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
+use BEAR\ToolUse\Fake\FakeThrowingDispatcher;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -204,11 +205,26 @@ final class StreamingAgentTest extends TestCase
 
     public function testToolDispatchException(): void
     {
-        $toolInput = json_encode(['id' => 999]);
+        $llmClient = new FakeStreamingLlmClient();
+        $tools = [
+            new Tool('article_get', 'Get an article', [
+                'type' => 'object',
+                'properties' => ['id' => ['type' => 'integer']],
+                'required' => ['id'],
+            ]),
+        ];
+        $agent = new StreamingAgent(
+            client: $llmClient,
+            dispatcher: new FakeThrowingDispatcher(),
+            tools: $tools,
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
 
-        $this->llmClient->setEventSequences([
+        $toolInput = json_encode(['id' => 1]);
+        $llmClient->setEventSequences([
             [
-                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'unknown_tool']),
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
                 new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
                 new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
                 new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
@@ -221,7 +237,7 @@ final class StreamingAgentTest extends TestCase
         ]);
 
         /** @var list<AgentEvent> $events */
-        $events = iterator_to_array($this->agent->runStream('Call unknown tool'));
+        $events = iterator_to_array($agent->runStream('Call tool'));
 
         $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
         self::assertContains(AgentEvent::TOOL_RESULT, $types);
@@ -260,6 +276,23 @@ final class StreamingAgentTest extends TestCase
 
         self::assertCount(1, $events);
         self::assertSame(AgentEvent::COMPLETED, $events[0]->type);
+    }
+
+    public function testToolUseWithEmptyPendingToolCalls(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        $lastEvent = end($events);
+        self::assertSame(AgentEvent::COMPLETED, $lastEvent->type);
     }
 
     public function testConversationHistoryPreserved(): void
