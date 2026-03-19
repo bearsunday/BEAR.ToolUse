@@ -156,6 +156,41 @@ $response = $agent->run('Tell me more about this user');
 $agent->reset();
 ```
 
+### 6. Streaming Agent
+
+For real-time output (SSE, WebSocket), use the streaming agent. It yields events as the LLM generates output.
+
+```php
+use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
+
+// Bind streaming client in DI module
+$this->bind(StreamingLlmClientInterface::class)->to(MyStreamingLlmClient::class);
+```
+
+```php
+// Create streaming agent
+$agent = $factory
+    ->addResources(['app://self/user', 'app://self/article'])
+    ->createStreaming('You are a helpful assistant.');
+
+// Consume events
+foreach ($agent->runStream('Get user 123') as $event) {
+    match ($event->type) {
+        'text_delta'  => sendSseEvent('text', $event->data['text']),
+        'tool_start'  => sendSseEvent('status', "Calling {$event->data['toolName']}..."),
+        'tool_result' => sendSseEvent('status', "{$event->data['toolName']} done"),
+        'completed'   => sendSseEvent('done', $event->data['fullText']),
+        'error'       => sendSseEvent('error', $event->data['message']),
+    };
+}
+```
+
+`AgentEvent` implements `JsonSerializable` for direct use in SSE responses:
+
+```php
+echo "data: " . json_encode($event) . "\n\n";
+```
+
 ## Controlling Tool Exposure
 
 ### Exclude Specific Methods
@@ -452,11 +487,13 @@ Errors detected by the Dispatcher:
 | Interface | Description |
 |-----------|-------------|
 | `LlmClientInterface` | LLM API client (user implementation) |
+| `StreamingLlmClientInterface` | Streaming LLM API client (user implementation) |
 | `DispatcherInterface` | Dispatches tool calls |
 | `ToolRegistryInterface` | Maps tool names to resources |
 | `SchemaConverterInterface` | Converts resources to tool definitions |
 | `ToolCollectorInterface` | Collects and registers tools |
 | `AgentInterface` | Agent runtime |
+| `StreamingAgentInterface` | Streaming agent runtime |
 | `ToolResultFilterInterface` | Response filter before sending to LLM |
 | `ConfirmationHandlerInterface` | User confirmation for destructive tools |
 
@@ -465,8 +502,11 @@ Errors detected by the Dispatcher:
 | Class | Description |
 |-------|-------------|
 | `Agent` | Manages conversation loop with LLM |
-| `AgentFactory` | Builder for agents |
-| `AgentResponse` | Agent execution result |
+| `StreamingAgent` | Streaming conversation loop yielding `AgentEvent` |
+| `AgentFactory` | Builder for agents (sync and streaming) |
+| `AgentResponse` | Agent execution result (sync) |
+| `AgentEvent` | Streaming event (`JsonSerializable`) |
+| `StreamEvent` | Low-level LLM stream event |
 | `Tool` | Tool definition (JSON Schema) |
 | `ToolCall` | Tool call from LLM |
 | `ToolResult` | Tool execution result |

@@ -156,6 +156,41 @@ $response = $agent->run('このユーザーについてもっと教えて');
 $agent->reset();
 ```
 
+### 6. ストリーミングエージェント
+
+リアルタイム出力（SSE、WebSocket）には、ストリーミングエージェントを使用します。LLMの出力に応じてイベントをyieldします。
+
+```php
+use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
+
+// DIモジュールでストリーミングクライアントをバインド
+$this->bind(StreamingLlmClientInterface::class)->to(MyStreamingLlmClient::class);
+```
+
+```php
+// ストリーミングエージェントを作成
+$agent = $factory
+    ->addResources(['app://self/user', 'app://self/article'])
+    ->createStreaming('あなたは親切なアシスタントです。');
+
+// イベントを処理
+foreach ($agent->runStream('ユーザー123を取得して') as $event) {
+    match ($event->type) {
+        'text_delta'  => sendSseEvent('text', $event->data['text']),
+        'tool_start'  => sendSseEvent('status', "{$event->data['toolName']}を呼び出し中..."),
+        'tool_result' => sendSseEvent('status', "{$event->data['toolName']}完了"),
+        'completed'   => sendSseEvent('done', $event->data['fullText']),
+        'error'       => sendSseEvent('error', $event->data['message']),
+    };
+}
+```
+
+`AgentEvent` は `JsonSerializable` を実装しており、SSEレスポンスで直接利用できます：
+
+```php
+echo "data: " . json_encode($event) . "\n\n";
+```
+
 ## ツール公開の制御
 
 ### メソッド単位での除外
@@ -452,11 +487,13 @@ Dispatcherが検出するエラー:
 | インターフェイス | 説明 |
 |-----------------|------|
 | `LlmClientInterface` | LLM APIクライアント（ユーザー実装） |
+| `StreamingLlmClientInterface` | ストリーミングLLM APIクライアント（ユーザー実装） |
 | `DispatcherInterface` | ツール呼び出しのディスパッチ |
 | `ToolRegistryInterface` | ツール名とリソースのマッピング |
 | `SchemaConverterInterface` | リソースからツール定義への変換 |
 | `ToolCollectorInterface` | ツールの収集と登録 |
 | `AgentInterface` | エージェントランタイム |
+| `StreamingAgentInterface` | ストリーミングエージェントランタイム |
 | `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
 | `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
 
@@ -465,8 +502,11 @@ Dispatcherが検出するエラー:
 | クラス | 説明 |
 |-------|------|
 | `Agent` | LLMとの会話ループを管理 |
-| `AgentFactory` | エージェントのビルダー |
-| `AgentResponse` | エージェント実行結果 |
+| `StreamingAgent` | `AgentEvent`をyieldするストリーミング会話ループ |
+| `AgentFactory` | エージェントのビルダー（同期・ストリーミング） |
+| `AgentResponse` | エージェント実行結果（同期） |
+| `AgentEvent` | ストリーミングイベント（`JsonSerializable`） |
+| `StreamEvent` | 低レベルLLMストリームイベント |
 | `Tool` | ツール定義（JSON Schema） |
 | `ToolCall` | LLMからのツール呼び出し |
 | `ToolResult` | ツール実行結果 |

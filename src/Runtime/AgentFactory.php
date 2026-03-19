@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Runtime;
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use BEAR\ToolUse\Llm\LlmClientInterface;
+use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
 use BEAR\ToolUse\Schema\Tool;
 use BEAR\ToolUse\Schema\ToolCollectorInterface;
 
@@ -24,6 +25,7 @@ final class AgentFactory
         private readonly ToolCollectorInterface $collector,
         private readonly ToolRegistryInterface $registry,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
+        private readonly StreamingLlmClientInterface|null $streamingClient = null,
     ) {
     }
 
@@ -56,6 +58,24 @@ final class AgentFactory
             systemPrompt: $systemPrompt,
             maxIterations: $maxIterations,
             confirmationHandler: $this->confirmationHandler,
+        );
+    }
+
+    /**
+     * Create the streaming agent
+     */
+    public function createStreaming(string $systemPrompt, int $maxIterations = 10): StreamingAgentInterface
+    {
+        if ($this->streamingClient === null) {
+            throw new StreamingNotConfiguredException('StreamingLlmClientInterface is not configured');
+        }
+
+        return new StreamingAgent(
+            client: $this->streamingClient,
+            dispatcher: $this->dispatcher,
+            tools: $this->tools,
+            systemPrompt: $systemPrompt,
+            maxIterations: $maxIterations,
         );
     }
 
