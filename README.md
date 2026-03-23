@@ -174,14 +174,24 @@ $agent = $factory
     ->createStreaming('You are a helpful assistant.');
 
 // Consume events
-foreach ($agent->runStream('Get user 123') as $event) {
+$gen = $agent->runStream('Get user 123');
+while ($gen->valid()) {
+    $event = $gen->current();
     match ($event->type) {
-        'text_delta'  => sendSseEvent('text', $event->data['text']),
-        'tool_start'  => sendSseEvent('status', "Calling {$event->data['toolName']}..."),
-        'tool_result' => sendSseEvent('status', "{$event->data['toolName']} done"),
-        'completed'   => sendSseEvent('done', $event->data['fullText']),
-        'error'       => sendSseEvent('error', $event->data['message']),
+        'text_delta'            => sendSseEvent('text', $event->data['text']),
+        'tool_start'            => sendSseEvent('status', "Calling {$event->data['toolName']}..."),
+        'tool_result'           => sendSseEvent('status', "{$event->data['toolName']} done"),
+        'confirmation_required' => sendSseEvent('confirm', json_encode($event)),
+        'completed'             => sendSseEvent('done', $event->data['fullText']),
+        'error'                 => sendSseEvent('error', $event->data['message']),
     };
+    // For confirmation events, send user's response via Generator::send()
+    if ($event->type === 'confirmation_required') {
+        $approved = waitForUserConfirmation(); // your app logic
+        $gen->send($approved);
+    } else {
+        $gen->next();
+    }
 }
 ```
 
@@ -298,6 +308,24 @@ N → "User cancelled this operation." → LLM: "Understood."
 ```
 
 If no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking).
+
+### Streaming Agent Confirmation
+
+`StreamingAgent` uses a yield-based approach instead of `ConfirmationHandlerInterface`. When a confirmable tool is encountered, it yields a `confirmation_required` event and receives the user's response via `Generator::send(bool)`.
+
+```text
+StreamingAgent yields: confirmation_required (toolName, input, message)
+  ↓
+SSE sends confirmation event to client → Client shows UI
+  ↓
+Client responds via separate HTTP request
+  ↓
+Server calls: $generator->send(true)  // or false to cancel
+  ↓
+StreamingAgent resumes: tool executed or cancelled
+```
+
+If `send()` is not called (e.g. `iterator_to_array()`), the tool is **denied by default** (safe default).
 
 ## Response Filtering
 
