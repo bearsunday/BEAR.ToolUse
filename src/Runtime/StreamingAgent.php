@@ -14,6 +14,8 @@ use Generator;
 use Override;
 use Throwable;
 
+use function array_key_exists;
+use function assert;
 use function json_decode;
 
 /**
@@ -22,6 +24,10 @@ use function json_decode;
  * Yields AgentEvent instances as the LLM generates output.
  * Text deltas are yielded immediately for real-time display.
  * Tool calls are executed and results fed back to the LLM.
+ *
+ * For confirmable tools, yields AgentEvent::CONFIRMATION_REQUIRED and
+ * receives approval via Generator::send(bool). If send() is not called
+ * (e.g. iterator_to_array), the tool is denied by default (safe default).
  *
  * @psalm-import-type PendingToolCall from StreamIterationState
  */
@@ -42,7 +48,6 @@ final class StreamingAgent implements StreamingAgentInterface
         private readonly array $tools,
         private readonly string $systemPrompt,
         private readonly int $maxIterations = 10,
-        private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
         $this->confirmableTools = $this->buildConfirmableTools($this->tools);
     }
@@ -80,9 +85,17 @@ final class StreamingAgent implements StreamingAgentInterface
 
             if ($state->stopReason === 'tool_use' && $state->pendingToolCalls !== []) {
                 $this->messages[] = Message::assistant($state->contentBlocks);
+
                 $dispatchGen = $this->dispatchPendingToolCalls($state->pendingToolCalls, $state->currentText);
-                foreach ($dispatchGen as $event) {
-                    yield $event;
+                while ($dispatchGen->valid()) {
+                    $event = $dispatchGen->current();
+                    assert($event instanceof AgentEvent);
+
+                    /** @psalm-suppress MixedAssignment */
+                    $sent = yield $event;
+                    /** @var bool $approved */
+                    $approved = $sent;
+                    $dispatchGen->send($approved);
                 }
 
                 /** @var list<ToolResult> $toolResults */
@@ -145,7 +158,7 @@ final class StreamingAgent implements StreamingAgentInterface
      * @param list<PendingToolCall> $pendingToolCalls
      * @param string                $currentText      LLM text for confirmation prompt
      *
-     * @return Generator<int, AgentEvent, mixed, list<ToolResult>>
+     * @return Generator<int, AgentEvent, bool, list<ToolResult>>
      */
     private function dispatchPendingToolCalls(array $pendingToolCalls, string $currentText): Generator
     {
@@ -159,13 +172,23 @@ final class StreamingAgent implements StreamingAgentInterface
                 input: $input,
             );
 
-            if ($this->isCancelled($toolCall, $currentText)) {
-                $result = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
-                $toolResults[] = $result;
+            if (array_key_exists($toolCall->name, $this->confirmableTools)) {
+                /** @var bool $approved */
+                $approved = yield AgentEvent::confirmationRequired(
+                    $toolCall->name,
+                    $toolCall->id,
+                    $toolCall->input,
+                    $currentText,
+                );
 
-                yield AgentEvent::toolResult($pending['name']);
+                if ($approved !== true) {
+                    $result = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
+                    $toolResults[] = $result;
 
-                continue;
+                    yield AgentEvent::toolResult($pending['name']);
+
+                    continue;
+                }
             }
 
             try {

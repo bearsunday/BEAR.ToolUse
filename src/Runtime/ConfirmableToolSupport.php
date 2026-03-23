@@ -4,11 +4,7 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Runtime;
 
-use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Schema\Tool;
-
-use function array_key_exists;
-use function assert;
 
 /**
  * Shared confirmation logic for Agent and StreamingAgent
@@ -37,23 +33,5 @@ trait ConfirmableToolSupport
         }
 
         return $confirmable;
-    }
-
-    private function isCancelled(ToolCall $toolCall, string $llmText): bool
-    {
-        if (! $this->requiresConfirmation($toolCall)) {
-            return false;
-        }
-
-        $confirmationHandler = $this->confirmationHandler;
-        assert($confirmationHandler instanceof ConfirmationHandlerInterface);
-
-        return ! $confirmationHandler->confirm($toolCall, $llmText);
-    }
-
-    private function requiresConfirmation(ToolCall $toolCall): bool
-    {
-        return $this->confirmationHandler !== null
-            && array_key_exists($toolCall->name, $this->confirmableTools);
     }
 }

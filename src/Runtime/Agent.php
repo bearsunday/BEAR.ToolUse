@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
+use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Llm\LlmClientInterface;
 use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
 use Override;
+
+use function array_key_exists;
+use function assert;
 
 /**
  * Agent runtime for managing LLM conversation loop
@@ -107,5 +111,23 @@ final class Agent implements AgentInterface
         }
 
         return $toolResults;
+    }
+
+    private function isCancelled(ToolCall $toolCall, string $llmText): bool
+    {
+        if (! $this->requiresConfirmation($toolCall)) {
+            return false;
+        }
+
+        $confirmationHandler = $this->confirmationHandler;
+        assert($confirmationHandler instanceof ConfirmationHandlerInterface);
+
+        return ! $confirmationHandler->confirm($toolCall, $llmText);
+    }
+
+    private function requiresConfirmation(ToolCall $toolCall): bool
+    {
+        return $this->confirmationHandler !== null
+            && array_key_exists($toolCall->name, $this->confirmableTools);
     }
 }
