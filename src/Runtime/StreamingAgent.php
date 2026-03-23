@@ -14,6 +14,8 @@ use Generator;
 use Override;
 use Throwable;
 
+use function array_key_exists;
+use function assert;
 use function json_decode;
 
 /**
@@ -27,8 +29,13 @@ use function json_decode;
  */
 final class StreamingAgent implements StreamingAgentInterface
 {
+    private const CANCELLED_MESSAGE = 'User cancelled this operation.';
+
     /** @var list<Message> */
     public array $messages = [];
+
+    /** @var array<string, bool> */
+    private readonly array $confirmableTools;
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -37,7 +44,18 @@ final class StreamingAgent implements StreamingAgentInterface
         private readonly array $tools,
         private readonly string $systemPrompt,
         private readonly int $maxIterations = 10,
+        private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
+        $confirmable = [];
+        foreach ($this->tools as $tool) {
+            if (! $tool->confirm) {
+                continue;
+            }
+
+            $confirmable[$tool->name] = true;
+        }
+
+        $this->confirmableTools = $confirmable;
     }
 
     /** @return Generator<int, AgentEvent, mixed, void> */
@@ -73,7 +91,7 @@ final class StreamingAgent implements StreamingAgentInterface
 
             if ($state->stopReason === 'tool_use' && $state->pendingToolCalls !== []) {
                 $this->messages[] = Message::assistant($state->contentBlocks);
-                $dispatchGen = $this->dispatchPendingToolCalls($state->pendingToolCalls);
+                $dispatchGen = $this->dispatchPendingToolCalls($state->pendingToolCalls, $state->currentText);
                 foreach ($dispatchGen as $event) {
                     yield $event;
                 }
@@ -139,7 +157,7 @@ final class StreamingAgent implements StreamingAgentInterface
      *
      * @return Generator<int, AgentEvent, mixed, list<ToolResult>>
      */
-    private function dispatchPendingToolCalls(array $pendingToolCalls): Generator
+    private function dispatchPendingToolCalls(array $pendingToolCalls, string $currentText): Generator
     {
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
@@ -150,6 +168,15 @@ final class StreamingAgent implements StreamingAgentInterface
                 name: $pending['name'],
                 input: $input,
             );
+
+            if ($this->isCancelled($toolCall, $currentText)) {
+                $result = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
+                $toolResults[] = $result;
+
+                yield AgentEvent::toolResult($pending['name']);
+
+                continue;
+            }
 
             try {
                 $result = $this->dispatcher->dispatch($toolCall);
@@ -163,5 +190,23 @@ final class StreamingAgent implements StreamingAgentInterface
         }
 
         return $toolResults;
+    }
+
+    private function isCancelled(ToolCall $toolCall, string $llmText): bool
+    {
+        if (! $this->requiresConfirmation($toolCall)) {
+            return false;
+        }
+
+        $confirmationHandler = $this->confirmationHandler;
+        assert($confirmationHandler instanceof ConfirmationHandlerInterface);
+
+        return ! $confirmationHandler->confirm($toolCall, $llmText);
+    }
+
+    private function requiresConfirmation(ToolCall $toolCall): bool
+    {
+        return $this->confirmationHandler !== null
+            && array_key_exists($toolCall->name, $this->confirmableTools);
     }
 }

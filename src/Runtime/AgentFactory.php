@@ -76,6 +76,7 @@ final class AgentFactory
             tools: $this->tools,
             systemPrompt: $systemPrompt,
             maxIterations: $maxIterations,
+            confirmationHandler: $this->confirmationHandler,
         );
     }
 
