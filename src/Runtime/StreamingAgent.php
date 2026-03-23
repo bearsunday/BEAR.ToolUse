@@ -15,7 +15,6 @@ use Override;
 use Throwable;
 
 use function array_key_exists;
-use function assert;
 use function json_decode;
 
 /**
@@ -88,11 +87,10 @@ final class StreamingAgent implements StreamingAgentInterface
 
                 $dispatchGen = $this->dispatchPendingToolCalls($state->pendingToolCalls, $state->currentText);
                 while ($dispatchGen->valid()) {
-                    $event = $dispatchGen->current();
-                    assert($event instanceof AgentEvent);
-
+                    /** @var AgentEvent $currentEvent */
+                    $currentEvent = $dispatchGen->current();
                     /** @psalm-suppress MixedAssignment */
-                    $sent = yield $event;
+                    $sent = yield $currentEvent;
                     /** @var bool $approved */
                     $approved = $sent;
                     $dispatchGen->send($approved);
