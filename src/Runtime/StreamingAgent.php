@@ -14,8 +14,6 @@ use Generator;
 use Override;
 use Throwable;
 
-use function array_key_exists;
-use function assert;
 use function json_decode;
 
 /**
@@ -29,7 +27,7 @@ use function json_decode;
  */
 final class StreamingAgent implements StreamingAgentInterface
 {
-    private const CANCELLED_MESSAGE = 'User cancelled this operation.';
+    use ConfirmableToolSupport;
 
     /** @var list<Message> */
     public array $messages = [];
@@ -46,16 +44,7 @@ final class StreamingAgent implements StreamingAgentInterface
         private readonly int $maxIterations = 10,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
-        $confirmable = [];
-        foreach ($this->tools as $tool) {
-            if (! $tool->confirm) {
-                continue;
-            }
-
-            $confirmable[$tool->name] = true;
-        }
-
-        $this->confirmableTools = $confirmable;
+        $this->confirmableTools = $this->buildConfirmableTools($this->tools);
     }
 
     /** @return Generator<int, AgentEvent, mixed, void> */
@@ -154,6 +143,7 @@ final class StreamingAgent implements StreamingAgentInterface
      * Dispatch pending tool calls and yield result events
      *
      * @param list<PendingToolCall> $pendingToolCalls
+     * @param string                $currentText      LLM text for confirmation prompt
      *
      * @return Generator<int, AgentEvent, mixed, list<ToolResult>>
      */
@@ -190,23 +180,5 @@ final class StreamingAgent implements StreamingAgentInterface
         }
 
         return $toolResults;
-    }
-
-    private function isCancelled(ToolCall $toolCall, string $llmText): bool
-    {
-        if (! $this->requiresConfirmation($toolCall)) {
-            return false;
-        }
-
-        $confirmationHandler = $this->confirmationHandler;
-        assert($confirmationHandler instanceof ConfirmationHandlerInterface);
-
-        return ! $confirmationHandler->confirm($toolCall, $llmText);
-    }
-
-    private function requiresConfirmation(ToolCall $toolCall): bool
-    {
-        return $this->confirmationHandler !== null
-            && array_key_exists($toolCall->name, $this->confirmableTools);
     }
 }

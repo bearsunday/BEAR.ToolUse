@@ -5,15 +5,11 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
-use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Llm\LlmClientInterface;
 use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
 use Override;
-
-use function array_key_exists;
-use function assert;
 
 /**
  * Agent runtime for managing LLM conversation loop
@@ -23,7 +19,7 @@ use function assert;
  */
 final class Agent implements AgentInterface
 {
-    private const CANCELLED_MESSAGE = 'User cancelled this operation.';
+    use ConfirmableToolSupport;
 
     /** @var list<Message> */
     public array $messages = [];
@@ -40,16 +36,7 @@ final class Agent implements AgentInterface
         private readonly int $maxIterations = 10,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
-        $confirmable = [];
-        foreach ($this->tools as $tool) {
-            if (! $tool->confirm) {
-                continue;
-            }
-
-            $confirmable[$tool->name] = true;
-        }
-
-        $this->confirmableTools = $confirmable;
+        $this->confirmableTools = $this->buildConfirmableTools($this->tools);
     }
 
     /**
@@ -110,7 +97,7 @@ final class Agent implements AgentInterface
     {
         $toolResults = [];
         foreach ($response->toolCalls as $toolCall) {
-            if ($this->isCancelled($toolCall, $response)) {
+            if ($this->isCancelled($toolCall, $response->getText())) {
                 $toolResults[] = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
 
                 continue;
@@ -120,23 +107,5 @@ final class Agent implements AgentInterface
         }
 
         return $toolResults;
-    }
-
-    private function isCancelled(ToolCall $toolCall, LlmResponse $response): bool
-    {
-        if (! $this->requiresConfirmation($toolCall)) {
-            return false;
-        }
-
-        $confirmationHandler = $this->confirmationHandler;
-        assert($confirmationHandler instanceof ConfirmationHandlerInterface);
-
-        return ! $confirmationHandler->confirm($toolCall, $response->getText());
-    }
-
-    private function requiresConfirmation(ToolCall $toolCall): bool
-    {
-        return $this->confirmationHandler !== null
-            && array_key_exists($toolCall->name, $this->confirmableTools);
     }
 }
