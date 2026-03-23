@@ -15,7 +15,8 @@ use function assert;
  */
 trait ConfirmableToolSupport
 {
-    private const string CANCELLED_MESSAGE = 'User cancelled this operation.';
+    /** @psalm-suppress MissingClassConstType */
+    private const CANCELLED_MESSAGE = 'User cancelled this operation.';
 
     /**
      * Build a lookup map of confirmable tool names
