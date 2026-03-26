@@ -38,7 +38,7 @@ src/
 │   ├── AgentFactory.php # Agent builder
 │   ├── AgentResponse.php
 │   ├── ConfirmationHandlerInterface.php # User confirmation (Agent)
-│   ├── ConfirmableToolSupport.php # Shared confirmation trait
+│   ├── ToolList.php       # Tool collection with query methods
 │   └── Message.php
 ├── Llm/                 # LLM related
 │   ├── LlmClientInterface.php  # User implementation
@@ -128,16 +128,16 @@ The agent supports user confirmation before executing destructive tool calls.
 1. `#[Tool(confirm: true)]` marks tools as confirmable (class or method level)
 2. `SchemaConverter::resolveConfirm()` reads confirm flag (explicit method confirm takes priority, unset falls back to class)
 3. `Schema\Tool::$confirm` stores the flag (included in `jsonSerialize()` as `confirm: true` only when true)
-4. `Agent::isCancelled()` checks if tool requires confirmation and calls `ConfirmationHandlerInterface`
-5. On cancellation, `ToolResult::error()` sends `"User cancelled this operation."` back to LLM
+4. `Agent::isCancelled()` checks `ToolList::isConfirmable()` and calls `ConfirmationHandlerInterface`
+5. On cancellation, `ToolResult::cancelled()` sends `"User cancelled this operation."` back to LLM
 
 ### How it works (StreamingAgent - yield-based)
 
-1. `StreamingAgent` builds `confirmableTools` map from tools with `confirm: true`
+1. `StreamingAgent` uses `ToolList::isConfirmable()` to check tools with `confirm: true`
 2. When a confirmable tool is encountered, yields `AgentEvent::confirmationRequired(toolName, toolId, input, message)`
 3. Consumer calls `Generator::send(bool)` — `true` to approve, `false` to cancel
 4. If `send()` is not called (e.g. `iterator_to_array()`), defaults to denial (safe default)
-5. On cancellation, `ToolResult::error()` sends `"User cancelled this operation."` back to LLM
+5. On cancellation, `ToolResult::cancelled()` sends `"User cancelled this operation."` back to LLM
 
 ### Key design decisions
 
@@ -146,7 +146,8 @@ The agent supports user confirmation before executing destructive tool calls.
 - LLM's text response serves as the confirmation message (no templates needed)
 - If no handler is bound (Agent), confirmable tools execute normally (no blocking)
 - The `confirm` property is serialized to JSON only when `true` (omitted when `false`)
-- `ConfirmableToolSupport` trait provides shared `buildConfirmableTools()` and `CANCELLED_MESSAGE`
+- `ToolList` provides `isConfirmable()` query — shared by both `Agent` and `StreamingAgent`
+- `ToolResult::cancelled()` encapsulates the cancellation message in the result object
 
 ## Response Filtering
 

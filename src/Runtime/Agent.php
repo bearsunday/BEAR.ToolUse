@@ -12,7 +12,6 @@ use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
 use Override;
 
-use function array_key_exists;
 use function assert;
 
 /**
@@ -23,13 +22,9 @@ use function assert;
  */
 final class Agent implements AgentInterface
 {
-    use ConfirmableToolSupport;
-
     /** @var list<Message> */
     public array $messages = [];
-
-    /** @var array<string, bool> */
-    private readonly array $confirmableTools;
+    private readonly ToolList $toolList;
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -40,7 +35,7 @@ final class Agent implements AgentInterface
         private readonly int $maxIterations = 10,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
-        $this->confirmableTools = $this->buildConfirmableTools($this->tools);
+        $this->toolList = new ToolList($this->tools);
     }
 
     /**
@@ -102,7 +97,7 @@ final class Agent implements AgentInterface
         $toolResults = [];
         foreach ($response->toolCalls as $toolCall) {
             if ($this->isCancelled($toolCall, $response->getText())) {
-                $toolResults[] = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
+                $toolResults[] = ToolResult::cancelled($toolCall->id);
 
                 continue;
             }
@@ -128,6 +123,6 @@ final class Agent implements AgentInterface
     private function requiresConfirmation(ToolCall $toolCall): bool
     {
         return $this->confirmationHandler !== null
-            && array_key_exists($toolCall->name, $this->confirmableTools);
+            && $this->toolList->isConfirmable($toolCall->name);
     }
 }

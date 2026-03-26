@@ -14,7 +14,6 @@ use Generator;
 use Override;
 use Throwable;
 
-use function array_key_exists;
 use function json_decode;
 
 /**
@@ -32,13 +31,9 @@ use function json_decode;
  */
 final class StreamingAgent implements StreamingAgentInterface
 {
-    use ConfirmableToolSupport;
-
     /** @var list<Message> */
     public array $messages = [];
-
-    /** @var array<string, bool> */
-    private readonly array $confirmableTools;
+    private readonly ToolList $toolList;
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -48,7 +43,7 @@ final class StreamingAgent implements StreamingAgentInterface
         private readonly string $systemPrompt,
         private readonly int $maxIterations = 10,
     ) {
-        $this->confirmableTools = $this->buildConfirmableTools($this->tools);
+        $this->toolList = new ToolList($this->tools);
     }
 
     /** @return Generator<int, AgentEvent, mixed, void> */
@@ -170,7 +165,7 @@ final class StreamingAgent implements StreamingAgentInterface
                 input: $input,
             );
 
-            if (array_key_exists($toolCall->name, $this->confirmableTools)) {
+            if ($this->toolList->isConfirmable($toolCall->name)) {
                 /** @var bool $approved */
                 $approved = yield AgentEvent::confirmationRequired(
                     $toolCall->name,
@@ -180,7 +175,7 @@ final class StreamingAgent implements StreamingAgentInterface
                 );
 
                 if ($approved !== true) {
-                    $result = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
+                    $result = ToolResult::cancelled($toolCall->id);
                     $toolResults[] = $result;
 
                     yield AgentEvent::toolResult($pending['name']);
