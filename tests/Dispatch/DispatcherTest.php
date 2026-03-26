@@ -159,6 +159,15 @@ final class DispatcherTest extends TestCase
         $this->assertSame('Something went wrong', $result->content);
     }
 
+    public function testToolResultCancelled(): void
+    {
+        $result = ToolResult::cancelled('call_456');
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('call_456', $result->toolUseId);
+        $this->assertSame('User cancelled this operation.', $result->content);
+    }
+
     public function testDispatchWithDifferentScheme(): void
     {
         $this->registry->register('page_article_get', 'page://self/article', 'get');
