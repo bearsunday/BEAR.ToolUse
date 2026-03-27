@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Schema;
 
 use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
+use BEAR\ToolUse\Types;
 use JsonSerializable;
 use Override;
 
 /**
  * Tool definition for AI agent
  *
- * @psalm-type InputSchema = array{type: string, properties: array<string, mixed>, required?: list<string>}
+ * @psalm-import-type InputSchema from Types
  * @SuppressWarnings("PHPMD.BooleanArgumentFlag")
  */
 final readonly class Tool implements JsonSerializable

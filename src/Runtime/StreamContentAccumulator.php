@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Llm\StreamEvent;
+use BEAR\ToolUse\Types;
 
 use function is_string;
 use function json_decode;
@@ -12,8 +13,8 @@ use function json_decode;
 /**
  * Accumulates stream events into content blocks and iteration state
  *
- * @psalm-import-type PendingToolCall from StreamIterationState
- * @psalm-import-type ContentBlock from StreamIterationState
+ * @psalm-import-type PendingToolCall from Types
+ * @psalm-import-type ContentBlock from Types
  */
 final class StreamContentAccumulator
 {

@@ -10,6 +10,7 @@ use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
 use BEAR\ToolUse\Schema\Tool;
+use BEAR\ToolUse\Types;
 use Generator;
 use Override;
 use Throwable;
@@ -27,7 +28,7 @@ use function json_decode;
  * receives approval via Generator::send(bool). If send() is not called
  * (e.g. iterator_to_array), the tool is denied by default (safe default).
  *
- * @psalm-import-type PendingToolCall from StreamIterationState
+ * @psalm-import-type PendingToolCall from Types
  */
 final class StreamingAgent implements StreamingAgentInterface
 {

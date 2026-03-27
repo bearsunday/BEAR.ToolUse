@@ -6,12 +6,13 @@ namespace BEAR\ToolUse\Llm;
 
 use BEAR\ToolUse\Runtime\Message;
 use BEAR\ToolUse\Schema\Tool;
+use BEAR\ToolUse\Types;
 use Generator;
 
 /**
  * Interface for streaming LLM API clients
  *
- * @psalm-type StreamGenerator = Generator<int, StreamEvent, mixed, void>
+ * @psalm-import-type StreamGenerator from Types
  */
 interface StreamingLlmClientInterface
 {

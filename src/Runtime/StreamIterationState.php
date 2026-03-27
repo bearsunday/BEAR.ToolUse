@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Runtime;
 
+use BEAR\ToolUse\Types;
+
 /**
  * State accumulated during a single streaming iteration
  *
- * @psalm-type PendingToolCall = array{id: string, name: string, inputJson: string}
- * @psalm-type ContentBlock = array{type: string, text?: string, id?: string, name?: string, input?: array<string, mixed>}
+ * @psalm-import-type PendingToolCall from Types
+ * @psalm-import-type ContentBlock from Types
  */
 final readonly class StreamIterationState
 {
