@@ -25,4 +25,9 @@ final readonly class ToolResult
     {
         return new self($toolUseId, true, $message);
     }
+
+    public static function cancelled(string $toolUseId): self
+    {
+        return new self($toolUseId, true, 'User cancelled this operation.');
+    }
 }

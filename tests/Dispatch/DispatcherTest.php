@@ -6,6 +6,7 @@ namespace BEAR\ToolUse\Dispatch;
 
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
+use BEAR\ToolUse\Fake\FakeSummaryFilter;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
@@ -158,6 +159,15 @@ final class DispatcherTest extends TestCase
         $this->assertSame('Something went wrong', $result->content);
     }
 
+    public function testToolResultCancelled(): void
+    {
+        $result = ToolResult::cancelled('call_456');
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('call_456', $result->toolUseId);
+        $this->assertSame('User cancelled this operation.', $result->content);
+    }
+
     public function testDispatchWithDifferentScheme(): void
     {
         $this->registry->register('page_article_get', 'page://self/article', 'get');
@@ -199,5 +209,42 @@ final class DispatcherTest extends TestCase
         $result = $this->dispatcher->dispatch($toolCall);
 
         $this->assertFalse($result->isError);
+    }
+
+    public function testDispatchWithFilter(): void
+    {
+        $this->registry->register('filtered_get', 'app://self/filtered', 'get', FakeSummaryFilter::class);
+        $toolCall = new ToolCall('call_filter', 'filtered_get', ['id' => 1]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertFalse($result->isError);
+        $this->assertStringContainsString('"id":1', $result->content);
+        $this->assertStringContainsString('"title":"Article 1"', $result->content);
+        $this->assertStringNotContainsString('body', $result->content);
+        $this->assertStringNotContainsString('metadata', $result->content);
+    }
+
+    public function testDispatchWithFilterNotAppliedOnError(): void
+    {
+        $this->registry->register('status_error_get', 'app://self/status-error', 'get', FakeSummaryFilter::class);
+        $toolCall = new ToolCall('call_filter_error', 'status_error_get', ['code' => 400]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertTrue($result->isError);
+        $this->assertStringContainsString('400:', $result->content);
+    }
+
+    public function testDispatchWithoutFilter(): void
+    {
+        $this->registry->register('filtered_get', 'app://self/filtered', 'get');
+        $toolCall = new ToolCall('call_no_filter', 'filtered_get', ['id' => 1]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertFalse($result->isError);
+        // Without filter, body text should be present
+        $this->assertStringContainsString('Long body text', $result->content);
     }
 }

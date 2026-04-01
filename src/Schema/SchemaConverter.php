@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Schema;
 use BEAR\Resource\ResourceObject;
 use BEAR\ToolUse\Attribute\Exclude;
 use BEAR\ToolUse\Attribute\Tool as ToolAttribute;
+use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
 use Override;
 use phpDocumentor\Reflection\DocBlockFactoryInterface;
 use ReflectionClass;
@@ -82,13 +83,32 @@ final readonly class SchemaConverter implements SchemaConverterInterface
         $httpMethod = strtolower(str_replace('on', '', $method->getName()));
         $name = $this->buildToolName($resourcePath, $httpMethod, $methodAttribute);
         $description = $this->buildDescription($method, $classAttribute, $methodAttribute);
+        $confirm = $this->resolveConfirm($classAttribute, $methodAttribute);
+        $filter = $this->resolveFilter($classAttribute, $methodAttribute);
 
         // Load JSON Schema for this method if available
         $jsonSchema = $this->jsonSchemaRepository?->getParameterSchema($resourceClass, $method->getName());
 
         $inputSchema = $this->buildInputSchema($method, $jsonSchema);
 
-        return new Tool($name, $description, $inputSchema);
+        return new Tool($name, $description, $inputSchema, $confirm, $filter);
+    }
+
+    private function resolveConfirm(ToolAttribute|null $classAttribute, ToolAttribute|null $methodAttribute): bool
+    {
+        $confirm = $methodAttribute?->confirm;
+        $confirm ??= $classAttribute?->confirm;
+
+        return $confirm ?? false;
+    }
+
+    /** @return class-string<ToolResultFilterInterface>|null */
+    private function resolveFilter(ToolAttribute|null $classAttribute, ToolAttribute|null $methodAttribute): string|null
+    {
+        $filter = $methodAttribute?->filter;
+        $filter ??= $classAttribute?->filter;
+
+        return $filter;
     }
 
     private function buildToolName(string $resourcePath, string $httpMethod, ToolAttribute|null $attribute): string
@@ -171,7 +191,7 @@ final readonly class SchemaConverter implements SchemaConverterInterface
 
         // Add description if not already set by JSON Schema
         if (! isset($schema['description']) && $this->descriptionResolver !== null) {
-            $description = $this->descriptionResolver->resolve($param, $jsonSchema);
+            $description = $this->descriptionResolver->resolve($param);
             if ($description !== null) {
                 $schema['description'] = $description;
             }

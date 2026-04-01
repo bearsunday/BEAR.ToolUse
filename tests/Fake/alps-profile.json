@@ -4,6 +4,11 @@
     "version": "1.0",
     "descriptor": [
       {
+        "id": "id",
+        "type": "semantic",
+        "title": "Resource identifier"
+      },
+      {
         "id": "userId",
         "type": "semantic",
         "title": "User identifier"

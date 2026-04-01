@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Dispatch;
 
+use BEAR\ToolUse\Fake\FakeSummaryFilter;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -53,5 +54,27 @@ final class ToolRegistryTest extends TestCase
         $this->assertCount(2, $names);
         $this->assertContains('article_get', $names);
         $this->assertContains('user_post', $names);
+    }
+
+    public function testRegisterWithFilter(): void
+    {
+        $this->registry->register('search_get', 'search', 'get', FakeSummaryFilter::class);
+
+        $mapping = $this->registry->get('search_get');
+
+        $this->assertNotNull($mapping);
+        $this->assertSame('search', $mapping['resourceUri']);
+        $this->assertSame('get', $mapping['method']);
+        $this->assertSame(FakeSummaryFilter::class, $mapping['filter']);
+    }
+
+    public function testRegisterWithoutFilterOmitsKey(): void
+    {
+        $this->registry->register('article_get', 'article', 'get');
+
+        $mapping = $this->registry->get('article_get');
+
+        $this->assertNotNull($mapping);
+        $this->assertArrayNotHasKey('filter', $mapping);
     }
 }

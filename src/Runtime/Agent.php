@@ -5,9 +5,14 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
+use BEAR\ToolUse\Dispatch\ToolCall;
+use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Llm\LlmClientInterface;
+use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
 use Override;
+
+use function assert;
 
 /**
  * Agent runtime for managing LLM conversation loop
@@ -19,6 +24,7 @@ final class Agent implements AgentInterface
 {
     /** @var list<Message> */
     public array $messages = [];
+    private readonly ToolList $toolList;
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -27,7 +33,9 @@ final class Agent implements AgentInterface
         private readonly array $tools,
         private readonly string $systemPrompt,
         private readonly int $maxIterations = 10,
+        private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
+        $this->toolList = new ToolList($this->tools);
     }
 
     /**
@@ -53,12 +61,7 @@ final class Agent implements AgentInterface
 
                 case 'tool_use':
                     $this->messages[] = Message::assistant($response->content);
-                    $toolResults = [];
-                    foreach ($response->toolCalls as $toolCall) {
-                        $result = $this->dispatcher->dispatch($toolCall);
-                        $toolResults[] = $result;
-                    }
-
+                    $toolResults      = $this->processToolCalls($response);
                     $this->messages[] = Message::toolResults($toolResults);
                     break;
 
@@ -86,5 +89,40 @@ final class Agent implements AgentInterface
     public function reset(): void
     {
         $this->messages = [];
+    }
+
+    /** @return list<ToolResult> */
+    private function processToolCalls(LlmResponse $response): array
+    {
+        $toolResults = [];
+        foreach ($response->toolCalls as $toolCall) {
+            if ($this->isCancelled($toolCall, $response->getText())) {
+                $toolResults[] = ToolResult::cancelled($toolCall->id);
+
+                continue;
+            }
+
+            $toolResults[] = $this->dispatcher->dispatch($toolCall);
+        }
+
+        return $toolResults;
+    }
+
+    private function isCancelled(ToolCall $toolCall, string $llmText): bool
+    {
+        if (! $this->requiresConfirmation($toolCall)) {
+            return false;
+        }
+
+        $confirmationHandler = $this->confirmationHandler;
+        assert($confirmationHandler instanceof ConfirmationHandlerInterface);
+
+        return ! $confirmationHandler->confirm($toolCall, $llmText);
+    }
+
+    private function requiresConfirmation(ToolCall $toolCall): bool
+    {
+        return $this->confirmationHandler !== null
+            && $this->toolList->isConfirmable($toolCall->name);
     }
 }

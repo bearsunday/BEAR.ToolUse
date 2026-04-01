@@ -156,6 +156,51 @@ $response = $agent->run('このユーザーについてもっと教えて');
 $agent->reset();
 ```
 
+### 6. ストリーミングエージェント
+
+リアルタイム出力（SSE、WebSocket）には、ストリーミングエージェントを使用します。LLMの出力に応じてイベントをyieldします。
+
+```php
+use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
+
+// DIモジュールでストリーミングクライアントをバインド
+$this->bind(StreamingLlmClientInterface::class)->to(MyStreamingLlmClient::class);
+```
+
+```php
+// ストリーミングエージェントを作成
+$agent = $factory
+    ->addResources(['app://self/user', 'app://self/article'])
+    ->createStreaming('あなたは親切なアシスタントです。');
+
+// イベントを処理
+$gen = $agent->runStream('ユーザー123を取得して');
+while ($gen->valid()) {
+    $event = $gen->current();
+    match ($event->type) {
+        'text_delta'            => sendSseEvent('text', $event->data['text']),
+        'tool_start'            => sendSseEvent('status', "{$event->data['toolName']}を呼び出し中..."),
+        'tool_result'           => sendSseEvent('status', "{$event->data['toolName']}完了"),
+        'confirmation_required' => sendSseEvent('confirm', json_encode($event)),
+        'completed'             => sendSseEvent('done', $event->data['fullText']),
+        'error'                 => sendSseEvent('error', $event->data['message']),
+    };
+    // 確認イベントの場合、Generator::send()でユーザーの応答を送信
+    if ($event->type === 'confirmation_required') {
+        $approved = waitForUserConfirmation(); // アプリケーション固有のロジック
+        $gen->send($approved);
+    } else {
+        $gen->next();
+    }
+}
+```
+
+`AgentEvent` は `JsonSerializable` を実装しており、SSEレスポンスで直接利用できます：
+
+```php
+echo "data: " . json_encode($event) . "\n\n";
+```
+
 ## ツール公開の制御
 
 ### メソッド単位での除外
@@ -192,6 +237,143 @@ use BEAR\ToolUse\Attribute\Tool;
 #[Tool(name: 'search_users', description: 'ユーザーを検索')]
 public function onGet(string $query): static { /* ... */ }
 ```
+
+## Human-in-the-Loop 確認
+
+`confirm: true` を指定すると、破壊的なツール呼び出しの実行前にユーザーの確認を求めます。
+
+### 確認が必要なツールの指定
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// クラスレベル - 全メソッドで確認が必要
+#[Tool(confirm: true)]
+class User extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+    public function onDelete(int $id): static { /* ... */ }
+}
+
+// メソッドレベル - 特定のメソッドのみ確認が必要
+class Article extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+
+    #[Tool(confirm: true)]
+    public function onDelete(int $id): static { /* ... */ }
+}
+```
+
+### 確認ハンドラーの実装
+
+```php
+use BEAR\ToolUse\Runtime\ConfirmationHandlerInterface;
+use BEAR\ToolUse\Dispatch\ToolCall;
+
+final class CliConfirmationHandler implements ConfirmationHandlerInterface
+{
+    public function confirm(ToolCall $toolCall, string $llmText): bool
+    {
+        echo $llmText . "\n実行しますか？ [Y/n]: ";
+
+        $line = fgets(STDIN);
+
+        return $line !== false && trim($line) !== 'n';
+    }
+}
+```
+
+### DIモジュールでのバインド
+
+```php
+$this->bind(ConfirmationHandlerInterface::class)->to(CliConfirmationHandler::class);
+```
+
+### 動作の仕組み
+
+LLMのテキストレスポンスが確認メッセージとして使われます。テンプレートは不要です。
+
+```text
+ユーザー: 「記事123を削除して」
+  ↓
+LLM: 「記事ID 123「BEAR.Sundayの紹介」を削除します。」
+     tool_use: article_delete({id: 123})
+  ↓
+ConfirmationHandler: 「記事ID 123「BEAR.Sundayの紹介」を削除します。」
+                     実行しますか？ [Y/n]:
+  ↓
+Y → ツール実行
+N → "User cancelled this operation." → LLM: 「承知しました。」
+```
+
+`ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。
+
+### ストリーミングエージェントでの確認
+
+`StreamingAgent` は `ConfirmationHandlerInterface` の代わりに yield-based アプローチを使用します。確認が必要なツールに遭遇すると `confirmation_required` イベントを yield し、`Generator::send(bool)` でユーザーの応答を受け取ります。
+
+```text
+StreamingAgent が yield: confirmation_required (toolName, input, message)
+  ↓
+SSE で確認イベントをクライアントに送信 → クライアントがUIを表示
+  ↓
+クライアントが別のHTTPリクエストで応答
+  ↓
+サーバーが呼び出し: $generator->send(true)  // false でキャンセル
+  ↓
+StreamingAgent が再開: ツール実行またはキャンセル
+```
+
+`send()` が呼ばれない場合（例: `iterator_to_array()`）、ツールは**デフォルトで拒否**されます（安全なデフォルト）。
+
+## レスポンスフィルタリング
+
+`filter` を使用して、LLMに送信する前にレスポンスボディを削減できます。大量のデータを返すリソースでトークン効率を改善します。
+
+### フィルタの定義
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
+use Override;
+
+final readonly class SummaryFilter implements ToolResultFilterInterface
+{
+    #[Override]
+    public function __invoke(mixed $body): mixed
+    {
+        // LLMに必要なフィールドだけを抽出
+        return array_map(fn (array $item) => [
+            'id' => $item['id'],
+            'title' => $item['title'],
+        ], $body);
+    }
+}
+```
+
+### リソースへの適用
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// クラスレベル - 全メソッドでフィルタを使用
+#[Tool(filter: SummaryFilter::class)]
+class Search extends ResourceObject
+{
+    public function onGet(string $query): static { /* ... */ }
+}
+
+// メソッドレベル - 特定のメソッドのみフィルタを使用
+class Article extends ResourceObject
+{
+    #[Tool(filter: SummaryFilter::class)]
+    public function onGet(string $query): static { /* ... */ }
+
+    public function onPost(string $title, string $body): static { /* ... */ }
+}
+```
+
+フィルタは成功レスポンスにのみ適用されます。エラーレスポンス（ステータスコード >= 400）はフィルタされずにそのまま送信されます。
 
 ## JSON Schemaの統合
 
@@ -274,9 +456,9 @@ ALPSプロファイルの`semantic`記述子から`title`または`doc.value`が
 
 複数のソースが説明を提供する場合、以下の順序で解決されます：
 
-1. **JSON Schema** - スキーマファイルの`description`プロパティ
-2. **ALPS** - セマンティック記述子の`title`または`doc.value`
-3. **PHPDoc** - `@param`タグの説明
+1. **JSON Schema** - スキーマファイルの`description`プロパティ（+ `enum`、`format`、`min/max`等の制約）
+2. **PHPDoc** - `@param`タグの説明（メソッド固有）
+3. **ALPS** - セマンティック記述子の`title`または`doc.value`（アプリケーション全体のフォールバック）
 
 ## アーキテクチャ
 
@@ -327,19 +509,26 @@ Dispatcherが検出するエラー:
 | インターフェイス | 説明 |
 |-----------------|------|
 | `LlmClientInterface` | LLM APIクライアント（ユーザー実装） |
+| `StreamingLlmClientInterface` | ストリーミングLLM APIクライアント（ユーザー実装） |
 | `DispatcherInterface` | ツール呼び出しのディスパッチ |
 | `ToolRegistryInterface` | ツール名とリソースのマッピング |
 | `SchemaConverterInterface` | リソースからツール定義への変換 |
 | `ToolCollectorInterface` | ツールの収集と登録 |
 | `AgentInterface` | エージェントランタイム |
+| `StreamingAgentInterface` | ストリーミングエージェントランタイム |
+| `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
+| `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
 
 ### 主要クラス
 
 | クラス | 説明 |
 |-------|------|
 | `Agent` | LLMとの会話ループを管理 |
-| `AgentFactory` | エージェントのビルダー |
-| `AgentResponse` | エージェント実行結果 |
+| `StreamingAgent` | `AgentEvent`をyieldするストリーミング会話ループ |
+| `AgentFactory` | エージェントのビルダー（同期・ストリーミング） |
+| `AgentResponse` | エージェント実行結果（同期） |
+| `AgentEvent` | ストリーミングイベント（`JsonSerializable`） |
+| `StreamEvent` | 低レベルLLMストリームイベント |
 | `Tool` | ツール定義（JSON Schema） |
 | `ToolCall` | LLMからのツール呼び出し |
 | `ToolResult` | ツール実行結果 |

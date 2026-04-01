@@ -156,6 +156,51 @@ $response = $agent->run('Tell me more about this user');
 $agent->reset();
 ```
 
+### 6. Streaming Agent
+
+For real-time output (SSE, WebSocket), use the streaming agent. It yields events as the LLM generates output.
+
+```php
+use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
+
+// Bind streaming client in DI module
+$this->bind(StreamingLlmClientInterface::class)->to(MyStreamingLlmClient::class);
+```
+
+```php
+// Create streaming agent
+$agent = $factory
+    ->addResources(['app://self/user', 'app://self/article'])
+    ->createStreaming('You are a helpful assistant.');
+
+// Consume events
+$gen = $agent->runStream('Get user 123');
+while ($gen->valid()) {
+    $event = $gen->current();
+    match ($event->type) {
+        'text_delta'            => sendSseEvent('text', $event->data['text']),
+        'tool_start'            => sendSseEvent('status', "Calling {$event->data['toolName']}..."),
+        'tool_result'           => sendSseEvent('status', "{$event->data['toolName']} done"),
+        'confirmation_required' => sendSseEvent('confirm', json_encode($event)),
+        'completed'             => sendSseEvent('done', $event->data['fullText']),
+        'error'                 => sendSseEvent('error', $event->data['message']),
+    };
+    // For confirmation events, send user's response via Generator::send()
+    if ($event->type === 'confirmation_required') {
+        $approved = waitForUserConfirmation(); // your app logic
+        $gen->send($approved);
+    } else {
+        $gen->next();
+    }
+}
+```
+
+`AgentEvent` implements `JsonSerializable` for direct use in SSE responses:
+
+```php
+echo "data: " . json_encode($event) . "\n\n";
+```
+
 ## Controlling Tool Exposure
 
 ### Exclude Specific Methods
@@ -192,6 +237,143 @@ use BEAR\ToolUse\Attribute\Tool;
 #[Tool(name: 'search_users', description: 'Search for users')]
 public function onGet(string $query): static { /* ... */ }
 ```
+
+## Human-in-the-Loop Confirmation
+
+Add `confirm: true` to require user confirmation before executing destructive tool calls.
+
+### Mark Tools as Confirmable
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// Class level - all methods require confirmation
+#[Tool(confirm: true)]
+class User extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+    public function onDelete(int $id): static { /* ... */ }
+}
+
+// Method level - only specific methods require confirmation
+class Article extends ResourceObject
+{
+    public function onGet(int $id): static { /* ... */ }
+
+    #[Tool(confirm: true)]
+    public function onDelete(int $id): static { /* ... */ }
+}
+```
+
+### Implement Confirmation Handler
+
+```php
+use BEAR\ToolUse\Runtime\ConfirmationHandlerInterface;
+use BEAR\ToolUse\Dispatch\ToolCall;
+
+final class CliConfirmationHandler implements ConfirmationHandlerInterface
+{
+    public function confirm(ToolCall $toolCall, string $llmText): bool
+    {
+        echo $llmText . "\nProceed? [Y/n]: ";
+
+        $line = fgets(STDIN);
+
+        return $line !== false && trim($line) !== 'n';
+    }
+}
+```
+
+### Bind in DI Module
+
+```php
+$this->bind(ConfirmationHandlerInterface::class)->to(CliConfirmationHandler::class);
+```
+
+### How It Works
+
+The LLM's text response serves as the confirmation message. No templates needed.
+
+```text
+User: "Delete article 123"
+  ↓
+LLM: "I will delete article 123 'Introduction to BEAR.Sunday'."
+     tool_use: article_delete({id: 123})
+  ↓
+ConfirmationHandler: "I will delete article 123 'Introduction to BEAR.Sunday'."
+                     Proceed? [Y/n]:
+  ↓
+Y → Tool executed
+N → "User cancelled this operation." → LLM: "Understood."
+```
+
+If no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking).
+
+### Streaming Agent Confirmation
+
+`StreamingAgent` uses a yield-based approach instead of `ConfirmationHandlerInterface`. When a confirmable tool is encountered, it yields a `confirmation_required` event and receives the user's response via `Generator::send(bool)`.
+
+```text
+StreamingAgent yields: confirmation_required (toolName, input, message)
+  ↓
+SSE sends confirmation event to client → Client shows UI
+  ↓
+Client responds via separate HTTP request
+  ↓
+Server calls: $generator->send(true)  // or false to cancel
+  ↓
+StreamingAgent resumes: tool executed or cancelled
+```
+
+If `send()` is not called (e.g. `iterator_to_array()`), the tool is **denied by default** (safe default).
+
+## Response Filtering
+
+Use `filter` to reduce the response body before sending to the LLM. This improves token efficiency for resources returning large payloads.
+
+### Define a Filter
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
+use Override;
+
+final readonly class SummaryFilter implements ToolResultFilterInterface
+{
+    #[Override]
+    public function __invoke(mixed $body): mixed
+    {
+        // Extract only the fields the LLM needs
+        return array_map(fn (array $item) => [
+            'id' => $item['id'],
+            'title' => $item['title'],
+        ], $body);
+    }
+}
+```
+
+### Apply to Resource
+
+```php
+use BEAR\ToolUse\Attribute\Tool;
+
+// Class level - all methods use the filter
+#[Tool(filter: SummaryFilter::class)]
+class Search extends ResourceObject
+{
+    public function onGet(string $query): static { /* ... */ }
+}
+
+// Method level - only specific methods use the filter
+class Article extends ResourceObject
+{
+    #[Tool(filter: SummaryFilter::class)]
+    public function onGet(string $query): static { /* ... */ }
+
+    public function onPost(string $title, string $body): static { /* ... */ }
+}
+```
+
+Filters are only applied to success responses. Error responses (status code >= 400) are sent unfiltered.
 
 ## JSON Schema Integration
 
@@ -274,9 +456,9 @@ The `title` or `doc.value` from ALPS `semantic` descriptors will be used as para
 
 When multiple sources provide descriptions, they are resolved in this order:
 
-1. **JSON Schema** - `description` property from schema file
-2. **ALPS** - `title` or `doc.value` from semantic descriptor
-3. **PHPDoc** - `@param` tag description
+1. **JSON Schema** - `description` property from schema file (+ constraints like `enum`, `format`, `min/max`)
+2. **PHPDoc** - `@param` tag description (method-specific)
+3. **ALPS** - `title` or `doc.value` from semantic descriptor (application-wide fallback)
 
 ## Architecture
 
@@ -327,19 +509,26 @@ Errors detected by the Dispatcher:
 | Interface | Description |
 |-----------|-------------|
 | `LlmClientInterface` | LLM API client (user implementation) |
+| `StreamingLlmClientInterface` | Streaming LLM API client (user implementation) |
 | `DispatcherInterface` | Dispatches tool calls |
 | `ToolRegistryInterface` | Maps tool names to resources |
 | `SchemaConverterInterface` | Converts resources to tool definitions |
 | `ToolCollectorInterface` | Collects and registers tools |
 | `AgentInterface` | Agent runtime |
+| `StreamingAgentInterface` | Streaming agent runtime |
+| `ToolResultFilterInterface` | Response filter before sending to LLM |
+| `ConfirmationHandlerInterface` | User confirmation for destructive tools |
 
 ### Main Classes
 
 | Class | Description |
 |-------|-------------|
 | `Agent` | Manages conversation loop with LLM |
-| `AgentFactory` | Builder for agents |
-| `AgentResponse` | Agent execution result |
+| `StreamingAgent` | Streaming conversation loop yielding `AgentEvent` |
+| `AgentFactory` | Builder for agents (sync and streaming) |
+| `AgentResponse` | Agent execution result (sync) |
+| `AgentEvent` | Streaming event (`JsonSerializable`) |
+| `StreamEvent` | Low-level LLM stream event |
 | `Tool` | Tool definition (JSON Schema) |
 | `ToolCall` | Tool call from LLM |
 | `ToolResult` | Tool execution result |
