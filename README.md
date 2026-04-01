@@ -382,19 +382,16 @@ Use BEAR.Resource's JSON Schema for enhanced parameter definitions.
 ### 1. Install with JsonSchemaModule
 
 ```php
-use BEAR\Resource\Module\JsonSchemaModule as ResourceJsonSchemaModule;
-use BEAR\Resource\Module\ResourceModule;
+use BEAR\Resource\Module\JsonSchemaModule;
 use BEAR\ToolUse\Module\ToolUseModule;
 
 $this->install(
-    new ToolUseModule(
-        new ResourceJsonSchemaModule(
-            '',                    // json_schema_dir (response)
-            '/path/to/validate',   // json_validate_dir (input params)
-            new ResourceModule('MyApp'),
-        ),
+    new JsonSchemaModule(
+        $this->appMeta->appDir . '/var/json_schema',
+        $this->appMeta->appDir . '/var/json_validate',
     ),
 );
+$this->install(new ToolUseModule());
 ```
 
 ### 2. Define JSON Schema
@@ -467,20 +464,20 @@ When multiple sources provide descriptions, they are resolved in this order:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Agent                                 │
-│  ┌─────────────┐    ┌──────────────┐    ┌───────────────┐  │
-│  │ LlmClient   │───▶│   Message    │───▶│  Dispatcher   │  │
-│  │ (Interface) │    │   Loop       │    │               │  │
-│  └─────────────┘    └──────────────┘    └───────┬───────┘  │
-│                                                  │          │
-│  ┌─────────────────────────────────────────────┐│          │
-│  │              ToolRegistry                    ││          │
-│  │  tool_name → {resourceUri, method}          ││          │
-│  └─────────────────────────────────────────────┘│          │
-│                                                  ▼          │
-│                                         ┌───────────────┐  │
-│                                         │ BEAR.Resource │  │
-│                                         └───────────────┘  │
+│                        Agent                                │
+│  ┌─────────────┐    ┌──────────────┐    ┌───────────────┐   │
+│  │ LlmClient   │───▶│   Message    │───▶│  Dispatcher   │   │
+│  │ (Interface) │    │   Loop       │    │               │   │
+│  └─────────────┘    └──────────────┘    └───────┬───────┘   │
+│                                                 │           │
+│  ┌─────────────────────────────────────────────┐│           │
+│  │              ToolRegistry                   ││           │
+│  │  tool_name → {resourceUri, method}          ││           │
+│  └─────────────────────────────────────────────┘│           │
+│                                                 ▼           │
+│                                         ┌───────────────┐   │
+│                                         │ BEAR.Resource │   │
+│                                         └───────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
