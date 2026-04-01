@@ -462,20 +462,23 @@ ALPSプロファイルの`semantic`記述子から`title`または`doc.value`が
 
 ## アーキテクチャ
 
-```mermaid
-flowchart TB
-    subgraph Agent
-        LlmClient["LlmClient<br/>(Interface)"]
-        MessageLoop["Message<br/>Loop"]
-        Dispatcher
-        ToolRegistry["ToolRegistry<br/>tool_name → {resourceUri, method}"]
-        Resource["BEAR.Resource"]
-
-        LlmClient --> MessageLoop
-        MessageLoop --> Dispatcher
-        Dispatcher --> ToolRegistry
-        ToolRegistry --> Resource
-    end
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Agent                                │
+│  ┌─────────────┐    ┌──────────────┐    ┌───────────────┐   │
+│  │ LlmClient   │───▶│   Message    │───▶│  Dispatcher   │   │
+│  │ (Interface) │    │   Loop       │    │               │   │
+│  └─────────────┘    └──────────────┘    └───────┬───────┘   │
+│                                                 │           │
+│  ┌─────────────────────────────────────────────┐│           │
+│  │              ToolRegistry                   ││           │
+│  │  tool_name → {resourceUri, method}          ││           │
+│  └─────────────────────────────────────────────┘│           │
+│                                                 ▼           │
+│                                         ┌───────────────┐   │
+│                                         │ BEAR.Resource │   │
+│                                         └───────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## エラーフィードバックループ
