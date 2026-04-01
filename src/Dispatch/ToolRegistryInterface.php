@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Dispatch;
 
+use BEAR\ToolUse\Types;
+
 /**
  * Registry for tool name to resource mapping
  *
- * @psalm-type ToolMapping = array{resourceUri: string, method: string, filter?: class-string<ToolResultFilterInterface>}
+ * @psalm-import-type ToolMapping from Types
  */
 interface ToolRegistryInterface
 {

@@ -151,4 +151,32 @@ final class AgentFactoryTest extends TestCase
         // article_get has confirm: false, so handler should NOT be called
         $this->assertEmpty($confirmationHandler->calls);
     }
+
+    public function testCreateStreamingAgentWithConfirmationHandler(): void
+    {
+        $confirmationHandler = new FakeConfirmationHandler();
+        $streamingClient     = new FakeStreamingLlmClient();
+        $injector            = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource            = $injector->getInstance(ResourceInterface::class);
+        $resourceFactory     = $injector->getInstance(FactoryInterface::class);
+
+        $registry   = new ToolRegistry();
+        $converter  = new SchemaConverter(DocBlockFactory::createInstance());
+        $collector  = new ToolCollector($converter, $registry, $resourceFactory);
+        $dispatcher = new Dispatcher($resource, $registry);
+
+        $factory = new AgentFactory(
+            $this->llmClient,
+            $dispatcher,
+            $collector,
+            $registry,
+            $confirmationHandler,
+            $streamingClient,
+        );
+        $factory->addResources(['app://self/article']);
+
+        $agent = $factory->createStreaming('You are a helpful assistant.', 5);
+
+        $this->assertInstanceOf(StreamingAgent::class, $agent);
+    }
 }

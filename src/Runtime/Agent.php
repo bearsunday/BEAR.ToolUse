@@ -12,7 +12,6 @@ use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
 use Override;
 
-use function array_key_exists;
 use function assert;
 
 /**
@@ -23,13 +22,9 @@ use function assert;
  */
 final class Agent implements AgentInterface
 {
-    private const CANCELLED_MESSAGE = 'User cancelled this operation.';
-
     /** @var list<Message> */
     public array $messages = [];
-
-    /** @var array<string, bool> */
-    private readonly array $confirmableTools;
+    private readonly ToolList $toolList;
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -40,16 +35,7 @@ final class Agent implements AgentInterface
         private readonly int $maxIterations = 10,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
-        $confirmable = [];
-        foreach ($this->tools as $tool) {
-            if (! $tool->confirm) {
-                continue;
-            }
-
-            $confirmable[$tool->name] = true;
-        }
-
-        $this->confirmableTools = $confirmable;
+        $this->toolList = new ToolList($this->tools);
     }
 
     /**
@@ -110,8 +96,8 @@ final class Agent implements AgentInterface
     {
         $toolResults = [];
         foreach ($response->toolCalls as $toolCall) {
-            if ($this->isCancelled($toolCall, $response)) {
-                $toolResults[] = ToolResult::error($toolCall->id, self::CANCELLED_MESSAGE);
+            if ($this->isCancelled($toolCall, $response->getText())) {
+                $toolResults[] = ToolResult::cancelled($toolCall->id);
 
                 continue;
             }
@@ -122,7 +108,7 @@ final class Agent implements AgentInterface
         return $toolResults;
     }
 
-    private function isCancelled(ToolCall $toolCall, LlmResponse $response): bool
+    private function isCancelled(ToolCall $toolCall, string $llmText): bool
     {
         if (! $this->requiresConfirmation($toolCall)) {
             return false;
@@ -131,12 +117,12 @@ final class Agent implements AgentInterface
         $confirmationHandler = $this->confirmationHandler;
         assert($confirmationHandler instanceof ConfirmationHandlerInterface);
 
-        return ! $confirmationHandler->confirm($toolCall, $response->getText());
+        return ! $confirmationHandler->confirm($toolCall, $llmText);
     }
 
     private function requiresConfirmation(ToolCall $toolCall): bool
     {
         return $this->confirmationHandler !== null
-            && array_key_exists($toolCall->name, $this->confirmableTools);
+            && $this->toolList->isConfirmable($toolCall->name);
     }
 }

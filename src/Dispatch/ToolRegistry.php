@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Dispatch;
 
+use BEAR\ToolUse\Types;
 use Override;
 
 use function array_key_exists;
@@ -12,7 +13,7 @@ use function array_keys;
 /**
  * Registry for tool name to resource mapping
  *
- * @psalm-type ToolMapping = array{resourceUri: string, method: string, filter?: class-string<ToolResultFilterInterface>}
+ * @psalm-import-type ToolMapping from Types
  */
 final class ToolRegistry implements ToolRegistryInterface
 {

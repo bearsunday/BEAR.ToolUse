@@ -174,14 +174,24 @@ $agent = $factory
     ->createStreaming('あなたは親切なアシスタントです。');
 
 // イベントを処理
-foreach ($agent->runStream('ユーザー123を取得して') as $event) {
+$gen = $agent->runStream('ユーザー123を取得して');
+while ($gen->valid()) {
+    $event = $gen->current();
     match ($event->type) {
-        'text_delta'  => sendSseEvent('text', $event->data['text']),
-        'tool_start'  => sendSseEvent('status', "{$event->data['toolName']}を呼び出し中..."),
-        'tool_result' => sendSseEvent('status', "{$event->data['toolName']}完了"),
-        'completed'   => sendSseEvent('done', $event->data['fullText']),
-        'error'       => sendSseEvent('error', $event->data['message']),
+        'text_delta'            => sendSseEvent('text', $event->data['text']),
+        'tool_start'            => sendSseEvent('status', "{$event->data['toolName']}を呼び出し中..."),
+        'tool_result'           => sendSseEvent('status', "{$event->data['toolName']}完了"),
+        'confirmation_required' => sendSseEvent('confirm', json_encode($event)),
+        'completed'             => sendSseEvent('done', $event->data['fullText']),
+        'error'                 => sendSseEvent('error', $event->data['message']),
     };
+    // 確認イベントの場合、Generator::send()でユーザーの応答を送信
+    if ($event->type === 'confirmation_required') {
+        $approved = waitForUserConfirmation(); // アプリケーション固有のロジック
+        $gen->send($approved);
+    } else {
+        $gen->next();
+    }
 }
 ```
 
@@ -298,6 +308,24 @@ N → "User cancelled this operation." → LLM: 「承知しました。」
 ```
 
 `ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。
+
+### ストリーミングエージェントでの確認
+
+`StreamingAgent` は `ConfirmationHandlerInterface` の代わりに yield-based アプローチを使用します。確認が必要なツールに遭遇すると `confirmation_required` イベントを yield し、`Generator::send(bool)` でユーザーの応答を受け取ります。
+
+```text
+StreamingAgent が yield: confirmation_required (toolName, input, message)
+  ↓
+SSE で確認イベントをクライアントに送信 → クライアントがUIを表示
+  ↓
+クライアントが別のHTTPリクエストで応答
+  ↓
+サーバーが呼び出し: $generator->send(true)  // false でキャンセル
+  ↓
+StreamingAgent が再開: ツール実行またはキャンセル
+```
+
+`send()` が呼ばれない場合（例: `iterator_to_array()`）、ツールは**デフォルトで拒否**されます（安全なデフォルト）。
 
 ## レスポンスフィルタリング
 
