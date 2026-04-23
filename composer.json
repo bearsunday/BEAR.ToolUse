@@ -18,8 +18,10 @@
     ],
     "require": {
         "php": "^8.2",
+        "ext-json": "*",
+        "ext-libxml": "*",
+        "ext-simplexml": "*",
         "bear/resource": "^1.10",
-        "koriym/app-state-diagram": "^0.8 || ^0.17",
         "phpdocumentor/reflection-docblock": "^5.2 || ^6.0",
         "ray/di": "^2.18"
     },

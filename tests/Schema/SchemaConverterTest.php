@@ -16,8 +16,6 @@ use BEAR\ToolUse\Fake\Resource\App\FakeSnakeCaseResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeTypesResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeUnionTypeResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeUserResource;
-use Koriym\AppStateDiagram\LabelNameTitle;
-use Koriym\AppStateDiagram\Profile;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -205,8 +203,7 @@ final class SchemaConverterTest extends TestCase
     {
         $docBlockFactory = DocBlockFactory::createInstance();
         $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary($profilePath);
         $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
         $converter = new SchemaConverter($docBlockFactory, $descriptionResolver);
 
@@ -241,8 +238,7 @@ final class SchemaConverterTest extends TestCase
     {
         $docBlockFactory = DocBlockFactory::createInstance();
         $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary($profilePath);
         $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
         $converter = new SchemaConverter($docBlockFactory, $descriptionResolver);
 
@@ -332,8 +328,7 @@ final class SchemaConverterTest extends TestCase
     {
         $docBlockFactory = DocBlockFactory::createInstance();
         $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary($profilePath);
         $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
         $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository, $dictionary);
 
@@ -354,8 +349,7 @@ final class SchemaConverterTest extends TestCase
     {
         $docBlockFactory = DocBlockFactory::createInstance();
         $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary($profilePath);
         $jsonSchemaRepository = new JsonSchemaRepository(__DIR__ . '/../Fake/json_schema');
         $descriptionResolver = new ParameterDescriptionResolver($docBlockFactory, $jsonSchemaRepository, $dictionary);
 

@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Schema;
 
-use Koriym\AppStateDiagram\LabelNameTitle;
-use Koriym\AppStateDiagram\Profile;
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+
+use function libxml_use_internal_errors;
 
 #[CoversClass(AlpsSemanticDictionary::class)]
 final class AlpsSemanticDictionaryTest extends TestCase
@@ -16,9 +17,7 @@ final class AlpsSemanticDictionaryTest extends TestCase
 
     protected function setUp(): void
     {
-        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $this->dictionary = new AlpsSemanticDictionary($profile);
+        $this->dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.json');
     }
 
     public function testGetWithTitle(): void
@@ -48,5 +47,43 @@ final class AlpsSemanticDictionaryTest extends TestCase
     {
         $this->assertSame('User identifier', $this->dictionary['userId']);
         $this->assertNull($this->dictionary['nonexistent'] ?? null);
+    }
+
+    public function testNestedDescriptorFromJson(): void
+    {
+        // nestedField is under user.descriptor with a string doc
+        $this->assertSame('Nested description', $this->dictionary->get('nestedField'));
+    }
+
+    public function testLoadXmlProfile(): void
+    {
+        $dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.xml');
+
+        $this->assertSame('Resource identifier', $dictionary->get('id'));
+        $this->assertSame('User identifier', $dictionary->get('userId'));
+        $this->assertSame('Name of the user', $dictionary->get('userName'));
+        $this->assertNull($dictionary->get('email'));
+        $this->assertSame('Nested description', $dictionary->get('nestedField'));
+    }
+
+    public function testUnsupportedExtensionThrows(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unsupported ALPS profile format: .yaml');
+
+        new AlpsSemanticDictionary(__DIR__ . '/../Fake/profile.yaml');
+    }
+
+    public function testInvalidXmlThrows(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/Failed to parse ALPS XML profile/');
+
+        $previous = libxml_use_internal_errors(true);
+        try {
+            new AlpsSemanticDictionary(__DIR__ . '/../Fake/invalid-alps.xml');
+        } finally {
+            libxml_use_internal_errors($previous);
+        }
     }
 }

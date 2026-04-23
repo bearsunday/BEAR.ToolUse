@@ -10,8 +10,6 @@ use BEAR\ToolUse\Fake\Resource\App\FakeJsonSchemaResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeMissingParamDocResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeSnakeCaseResource;
 use BEAR\ToolUse\Fake\Resource\App\FakeUserResource;
-use Koriym\AppStateDiagram\LabelNameTitle;
-use Koriym\AppStateDiagram\Profile;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -37,9 +35,7 @@ final class ParameterDescriptionResolverTest extends TestCase
     public function testResolveFromAlpsDictionary(): void
     {
         $docBlockFactory = DocBlockFactory::createInstance();
-        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.json');
         $resolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
 
         $reflection = new ReflectionClass(FakeUserResource::class);
@@ -54,9 +50,7 @@ final class ParameterDescriptionResolverTest extends TestCase
     public function testPhpDocTakesPriorityOverAlps(): void
     {
         $docBlockFactory = DocBlockFactory::createInstance();
-        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.json');
         $resolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
 
         // FakeDocParamResource has @param for "id", ALPS also has "id" descriptor
@@ -73,9 +67,7 @@ final class ParameterDescriptionResolverTest extends TestCase
     public function testSnakeCaseToCamelCaseForAlps(): void
     {
         $docBlockFactory = DocBlockFactory::createInstance();
-        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.json');
         $resolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
 
         $reflection = new ReflectionClass(FakeSnakeCaseResource::class);
@@ -170,9 +162,7 @@ final class ParameterDescriptionResolverTest extends TestCase
     public function testFallsBackToAlpsWhenNoPhpDoc(): void
     {
         $docBlockFactory = DocBlockFactory::createInstance();
-        $profilePath = __DIR__ . '/../Fake/alps-profile.json';
-        $profile = new Profile($profilePath, new LabelNameTitle());
-        $dictionary = new AlpsSemanticDictionary($profile);
+        $dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.json');
         $resolver = new ParameterDescriptionResolver($docBlockFactory, null, $dictionary);
 
         // FakeUserResource::onGet has no PHPDoc, so should fall back to ALPS
