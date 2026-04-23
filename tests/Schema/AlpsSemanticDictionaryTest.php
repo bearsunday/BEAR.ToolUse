@@ -55,6 +55,31 @@ final class AlpsSemanticDictionaryTest extends TestCase
         $this->assertSame('Nested description', $this->dictionary->get('nestedField'));
     }
 
+    public function testNonSemanticDescriptorIsExcluded(): void
+    {
+        // createUser is type=safe (transition) — must NOT appear in dictionary
+        $this->assertNull($this->dictionary->get('createUser'));
+    }
+
+    public function testLocalHrefResolvesToReferencedDescription(): void
+    {
+        // userIdAlias has href="#userId" → resolves to "User identifier"
+        $this->assertSame('User identifier', $this->dictionary->get('userIdAlias'));
+    }
+
+    public function testDanglingHrefIsSkipped(): void
+    {
+        // danglingHref references a non-existent id — left out of dictionary
+        $this->assertNull($this->dictionary->get('danglingHref'));
+    }
+
+    public function testHrefChainResolvesAcrossMultipleHops(): void
+    {
+        // chainA -> chainB -> userId
+        $this->assertSame('User identifier', $this->dictionary->get('chainA'));
+        $this->assertSame('User identifier', $this->dictionary->get('chainB'));
+    }
+
     public function testLoadXmlProfile(): void
     {
         $dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.xml');
@@ -64,6 +89,10 @@ final class AlpsSemanticDictionaryTest extends TestCase
         $this->assertSame('Name of the user', $dictionary->get('userName'));
         $this->assertNull($dictionary->get('email'));
         $this->assertSame('Nested description', $dictionary->get('nestedField'));
+        $this->assertNull($dictionary->get('createUser'));
+        $this->assertSame('User identifier', $dictionary->get('userIdAlias'));
+        $this->assertNull($dictionary->get('danglingHref'));
+        $this->assertSame('User identifier', $dictionary->get('chainA'));
     }
 
     public function testUnsupportedExtensionThrows(): void

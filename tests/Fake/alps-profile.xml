@@ -11,4 +11,9 @@
       <doc>Nested description</doc>
     </descriptor>
   </descriptor>
+  <descriptor id="createUser" type="safe" title="Create user transition"/>
+  <descriptor id="userIdAlias" type="semantic" href="#userId"/>
+  <descriptor id="danglingHref" type="semantic" href="#nonExistent"/>
+  <descriptor id="chainA" type="semantic" href="#chainB"/>
+  <descriptor id="chainB" type="semantic" href="#userId"/>
 </alps>
