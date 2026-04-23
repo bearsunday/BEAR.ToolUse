@@ -450,7 +450,7 @@ $dictionary = new AlpsSemanticDictionary('/path/to/profile.json');
 $converter = new SchemaConverter($dictionary);
 ```
 
-The `title` or `doc.value` from ALPS `semantic` descriptors will be used as parameter descriptions.
+Both **JSON** and **XML** ALPS profiles are supported (format is detected from the file extension). The `title` or `doc` of `semantic` descriptors is used as the parameter description. Same-profile `href="#id"` references are resolved automatically; non-semantic descriptors (`safe` / `unsafe` / `idempotent`) are excluded.
 
 ## Parameter Description Priority
 
