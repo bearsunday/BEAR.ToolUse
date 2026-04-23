@@ -8,8 +8,6 @@ use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
-use function libxml_use_internal_errors;
-
 #[CoversClass(AlpsSemanticDictionary::class)]
 final class AlpsSemanticDictionaryTest extends TestCase
 {
@@ -99,6 +97,7 @@ final class AlpsSemanticDictionaryTest extends TestCase
         $this->assertSame('User identifier', $dictionary->get('userIdAlias'));
         $this->assertNull($dictionary->get('danglingHref'));
         $this->assertSame('User identifier', $dictionary->get('chainA'));
+        $this->assertNull($dictionary->get('externalRef'));
     }
 
     public function testUnsupportedExtensionThrows(): void
@@ -112,13 +111,32 @@ final class AlpsSemanticDictionaryTest extends TestCase
     public function testInvalidXmlThrows(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches('/Failed to parse ALPS XML profile/');
+        $this->expectExceptionMessageMatches('/Failed to parse ALPS XML profile .*: .+/');
 
-        $previous = libxml_use_internal_errors(true);
-        try {
-            new AlpsSemanticDictionary(__DIR__ . '/../Fake/invalid-alps.xml');
-        } finally {
-            libxml_use_internal_errors($previous);
-        }
+        new AlpsSemanticDictionary(__DIR__ . '/../Fake/invalid-alps.xml');
+    }
+
+    public function testInvalidJsonThrows(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/Failed to parse ALPS JSON profile/');
+
+        new AlpsSemanticDictionary(__DIR__ . '/../Fake/invalid-alps.json');
+    }
+
+    public function testMissingJsonFileThrows(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/Unable to read ALPS profile/');
+
+        new AlpsSemanticDictionary(__DIR__ . '/../Fake/no-such-file.json');
+    }
+
+    public function testMissingXmlFileThrows(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/Unable to read ALPS profile/');
+
+        new AlpsSemanticDictionary(__DIR__ . '/../Fake/no-such-file.xml');
     }
 }

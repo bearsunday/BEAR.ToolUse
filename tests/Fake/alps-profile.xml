@@ -16,4 +16,5 @@
   <descriptor id="danglingHref" type="semantic" href="#nonExistent"/>
   <descriptor id="chainA" type="semantic" href="#chainB"/>
   <descriptor id="chainB" type="semantic" href="#userId"/>
+  <descriptor id="externalRef" type="semantic" href="https://example.com/profile.xml#userId"/>
 </alps>

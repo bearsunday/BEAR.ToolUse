@@ -6,13 +6,19 @@ namespace BEAR\ToolUse\Schema;
 
 use ArrayObject;
 use InvalidArgumentException;
+use JsonException;
 use SimpleXMLElement;
 use stdClass;
 
+use function array_map;
 use function file_get_contents;
+use function implode;
 use function is_array;
 use function is_string;
 use function json_decode;
+use function libxml_clear_errors;
+use function libxml_get_errors;
+use function libxml_use_internal_errors;
 use function pathinfo;
 use function simplexml_load_string;
 use function sprintf;
@@ -132,8 +138,19 @@ final class AlpsSemanticDictionary extends ArrayObject
     /** @return list<Entry> */
     private function parseJson(string $path): array
     {
-        /** @var mixed $data */
-        $data = json_decode((string) file_get_contents($path), false, 512, JSON_THROW_ON_ERROR);
+        $contents = $this->readProfile($path);
+
+        try {
+            /** @var mixed $data */
+            $data = json_decode($contents, false, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new InvalidArgumentException(
+                sprintf('Failed to parse ALPS JSON profile %s: %s', $path, $e->getMessage()),
+                0,
+                $e,
+            );
+        }
+
         /** @var mixed $alps */
         $alps = $data instanceof stdClass ? ($data->alps ?? null) : null;
         /** @var list<stdClass>|stdClass $descriptors */
@@ -193,9 +210,26 @@ final class AlpsSemanticDictionary extends ArrayObject
     /** @return list<Entry> */
     private function parseXml(string $path): array
     {
-        $xml = simplexml_load_string((string) file_get_contents($path));
-        if ($xml === false) {
-            throw new InvalidArgumentException(sprintf('Failed to parse ALPS XML profile: %s', $path));
+        $contents = $this->readProfile($path);
+
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $xml = simplexml_load_string($contents);
+            if ($xml === false) {
+                $errors = array_map(
+                    static fn (object $error): string => trim($error->message),
+                    libxml_get_errors(),
+                );
+                libxml_clear_errors();
+
+                throw new InvalidArgumentException(sprintf(
+                    'Failed to parse ALPS XML profile %s: %s',
+                    $path,
+                    implode('; ', $errors),
+                ));
+            }
+        } finally {
+            libxml_use_internal_errors($previous);
         }
 
         $entries = [];
@@ -203,6 +237,16 @@ final class AlpsSemanticDictionary extends ArrayObject
         $this->walkXml($xml->descriptor, $entries);
 
         return $entries;
+    }
+
+    private function readProfile(string $path): string
+    {
+        $contents = @file_get_contents($path);
+        if ($contents === false) {
+            throw new InvalidArgumentException(sprintf('Unable to read ALPS profile: %s', $path));
+        }
+
+        return $contents;
     }
 
     /** @param list<Entry> $entries */
