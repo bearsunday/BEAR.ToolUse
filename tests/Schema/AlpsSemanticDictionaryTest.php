@@ -80,6 +80,12 @@ final class AlpsSemanticDictionaryTest extends TestCase
         $this->assertSame('User identifier', $this->dictionary->get('chainB'));
     }
 
+    public function testCrossFileHrefIsIgnored(): void
+    {
+        // href that does not start with '#' is not resolved (cross-file ref unsupported)
+        $this->assertNull($this->dictionary->get('externalRef'));
+    }
+
     public function testLoadXmlProfile(): void
     {
         $dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.xml');

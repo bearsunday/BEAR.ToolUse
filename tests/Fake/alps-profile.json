@@ -59,6 +59,11 @@
         "id": "chainB",
         "type": "semantic",
         "href": "#userId"
+      },
+      {
+        "id": "externalRef",
+        "type": "semantic",
+        "href": "https://example.com/profile.json#userId"
       }
     ]
   }
