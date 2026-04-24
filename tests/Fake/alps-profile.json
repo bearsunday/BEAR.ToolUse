@@ -23,6 +23,47 @@
       {
         "id": "email",
         "type": "semantic"
+      },
+      {
+        "id": "user",
+        "type": "semantic",
+        "descriptor": [
+          {
+            "id": "nestedField",
+            "type": "semantic",
+            "doc": "Nested description"
+          }
+        ]
+      },
+      {
+        "id": "createUser",
+        "type": "safe",
+        "title": "Create user transition"
+      },
+      {
+        "id": "userIdAlias",
+        "type": "semantic",
+        "href": "#userId"
+      },
+      {
+        "id": "danglingHref",
+        "type": "semantic",
+        "href": "#nonExistent"
+      },
+      {
+        "id": "chainA",
+        "type": "semantic",
+        "href": "#chainB"
+      },
+      {
+        "id": "chainB",
+        "type": "semantic",
+        "href": "#userId"
+      },
+      {
+        "id": "externalRef",
+        "type": "semantic",
+        "href": "https://example.com/profile.json#userId"
       }
     ]
   }

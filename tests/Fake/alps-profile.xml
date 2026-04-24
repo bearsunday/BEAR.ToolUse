@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alps>
+  <descriptor id="id" type="semantic" title="Resource identifier"/>
+  <descriptor id="userId" type="semantic" title="User identifier"/>
+  <descriptor id="userName" type="semantic">
+    <doc>Name of the user</doc>
+  </descriptor>
+  <descriptor id="email" type="semantic"/>
+  <descriptor id="user" type="semantic">
+    <descriptor id="nestedField" type="semantic">
+      <doc>Nested description</doc>
+    </descriptor>
+  </descriptor>
+  <descriptor id="createUser" type="safe" title="Create user transition"/>
+  <descriptor id="userIdAlias" type="semantic" href="#userId"/>
+  <descriptor id="danglingHref" type="semantic" href="#nonExistent"/>
+  <descriptor id="chainA" type="semantic" href="#chainB"/>
+  <descriptor id="chainB" type="semantic" href="#userId"/>
+  <descriptor id="externalRef" type="semantic" href="https://example.com/profile.xml#userId"/>
+</alps>

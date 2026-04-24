@@ -450,7 +450,7 @@ $dictionary = new AlpsSemanticDictionary('/path/to/profile.json');
 $converter = new SchemaConverter($dictionary);
 ```
 
-ALPSプロファイルの`semantic`記述子から`title`または`doc.value`がパラメータの説明として使用されます。
+**JSON**と**XML**の両形式の ALPS プロファイルをサポートしています（ファイル拡張子で自動判別）。`semantic`記述子の`title`または`doc`がパラメータの説明として使用されます。同一プロファイル内の`href="#id"`参照は自動解決され、`safe` / `unsafe` / `idempotent`（トランジション）記述子は除外されます。
 
 ## パラメータ説明の優先順位
 
