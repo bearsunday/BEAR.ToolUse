@@ -406,6 +406,8 @@ final readonly class AuditLogObserver implements ToolCallObserverInterface
 }
 ```
 
+> **Note:** `$toolCall->input` and `$result->content` may contain sensitive values (PII, credentials, API tokens) depending on the underlying resource. Sanitize or redact such fields before writing to persistent logs, traces, or external systems.
+
 ### Bind in DI Module
 
 ```php

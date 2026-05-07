@@ -406,6 +406,8 @@ final readonly class AuditLogObserver implements ToolCallObserverInterface
 }
 ```
 
+> **Note:** `$toolCall->input` や `$result->content` には、利用するリソース次第で機密情報（個人情報、認証情報、API トークンなど）が含まれる可能性があります。永続ログ・トレース・外部システムへ送る前に、該当フィールドのサニタイズ／マスキングを行ってください。
+
 ### DI モジュールでバインド
 
 ```php
