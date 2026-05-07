@@ -312,4 +312,19 @@ final class DispatcherTest extends TestCase
         $this->assertStringContainsString('Unknown tool', $call['result']->content);
         $this->assertGreaterThan(0.0, $call['durationMs']);
     }
+
+    public function testObserverReceivesPostFilterResult(): void
+    {
+        $this->registry->register('filtered_get', 'app://self/filtered', 'get', FakeSummaryFilter::class);
+        $toolCall = new ToolCall('call_obs_filter', 'filtered_get', ['id' => 1]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertCount(1, $this->observer->calls);
+        $call = $this->observer->calls[0];
+        $this->assertSame($result, $call['result']);
+        // Observer must see the filtered content (what the LLM sees), not the raw body.
+        $this->assertStringContainsString('"title":"Article 1"', $call['result']->content);
+        $this->assertStringNotContainsString('Long body text', $call['result']->content);
+    }
 }
