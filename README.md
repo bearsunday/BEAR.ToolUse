@@ -419,6 +419,8 @@ If no observer is bound, `NullToolCallObserver` (a no-op) is used by default.
 - The observer receives the `ToolResult` **after** the response filter has been applied — i.e. exactly what the LLM will see.
 - The interface is intentionally minimal. Application-level context (thread/conversation IDs, user ID, etc.) belongs in your own stateful observer implementation, not in the interface signature.
 - `Dispatcher` ensures the observer is called exactly once per dispatch, regardless of which branch produced the result.
+- **Cancelled tool calls bypass the Dispatcher entirely.** Confirmation denial is handled at the `Agent` / `StreamingAgent` layer (via `ConfirmationHandlerInterface` or `Generator::send(false)`), which returns `ToolResult::cancelled()` without calling `Dispatcher::dispatch()`. The observer is therefore **not** invoked for cancellations.
+- **Exceptions thrown from `observe()` propagate out of `Dispatcher::dispatch()`.** Observer implementations are responsible for handling their own errors (e.g. wrapping persistence calls in try/catch) if observation failures should not break tool dispatch.
 
 ## JSON Schema Integration
 

@@ -419,6 +419,8 @@ Observer がバインドされていない場合、デフォルトで `NullToolC
 - Observer に渡される `ToolResult` はレスポンスフィルタ適用**後**のもの、つまり LLM が実際に受け取る形です。
 - インターフェイスは意図的に最小限です。スレッドID／会話ID／ユーザーIDなどアプリケーション固有のコンテキストは、利用者側のステートフルな Observer 実装で扱うべきです（インターフェイス引数には含めません）。
 - `Dispatcher` は分岐に関わらず、ディスパッチごとに必ず 1 回 Observer を呼び出します。
+- **キャンセルされたツール呼び出しは Dispatcher を経由しません。** 確認拒否は `Agent` / `StreamingAgent` 層（`ConfirmationHandlerInterface` または `Generator::send(false)`）で処理され、`Dispatcher::dispatch()` を呼ばずに `ToolResult::cancelled()` を返します。そのため Observer はキャンセル時には**呼び出されません**。
+- **`observe()` から throw された例外は `Dispatcher::dispatch()` の外へ伝播します。** 観測の失敗でツール呼び出しを止めたくない場合、Observer 実装側で I/O を try/catch するなどして自身でエラーハンドリングする責任があります。
 
 ## JSON Schemaの統合
 

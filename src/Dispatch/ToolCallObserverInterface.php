@@ -15,6 +15,10 @@ interface ToolCallObserverInterface
      * Called once per Dispatcher::dispatch(), after the (post-filter) ToolResult
      * is determined — across success, status>=400, exception, and unknown-tool paths.
      *
+     * Note: cancelled tool calls bypass the Dispatcher entirely (handled at the
+     * Agent / StreamingAgent layer via ConfirmationHandlerInterface or generator
+     * send(false)), so this observer is not invoked for them.
+     *
      * The observer runs synchronously in the dispatch path. Any exception thrown
      * propagates to the caller of dispatch(). Implementations performing I/O
      * (audit logs, metrics, traces) are responsible for their own error handling.
