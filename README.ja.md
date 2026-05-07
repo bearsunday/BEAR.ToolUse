@@ -375,6 +375,51 @@ class Article extends ResourceObject
 
 フィルタは成功レスポンスにのみ適用されます。エラーレスポンス（ステータスコード >= 400）はフィルタされずにそのまま送信されます。
 
+## ツール呼び出しの観測
+
+すべてのツール呼び出しをフックして、監査ログ・メトリクス・レイテンシ計測などを行えます。Observer はディスパッチごとに 1 回だけ呼び出され、成功・ステータスコードエラー・例外・未知ツールのどの経路でも `ToolCall`、`ToolResult`、経過時間（ミリ秒）を受け取ります。
+
+### Observer の実装
+
+```php
+use BEAR\ToolUse\Dispatch\ToolCall;
+use BEAR\ToolUse\Dispatch\ToolCallObserverInterface;
+use BEAR\ToolUse\Dispatch\ToolResult;
+use Override;
+
+final readonly class AuditLogObserver implements ToolCallObserverInterface
+{
+    public function __construct(
+        private LoggerInterface $logger,
+    ) {}
+
+    #[Override]
+    public function observe(ToolCall $toolCall, ToolResult $result, float $durationMs): void
+    {
+        $this->logger->info('tool_call', [
+            'name' => $toolCall->name,
+            'input' => $toolCall->input,
+            'isError' => $result->isError,
+            'durationMs' => $durationMs,
+        ]);
+    }
+}
+```
+
+### DI モジュールでバインド
+
+```php
+$this->bind(ToolCallObserverInterface::class)->to(AuditLogObserver::class);
+```
+
+Observer がバインドされていない場合、デフォルトで `NullToolCallObserver`（no-op）が使用されます。
+
+### 設計上の補足
+
+- Observer に渡される `ToolResult` はレスポンスフィルタ適用**後**のもの、つまり LLM が実際に受け取る形です。
+- インターフェイスは意図的に最小限です。スレッドID／会話ID／ユーザーIDなどアプリケーション固有のコンテキストは、利用者側のステートフルな Observer 実装で扱うべきです（インターフェイス引数には含めません）。
+- `Dispatcher` は分岐に関わらず、ディスパッチごとに必ず 1 回 Observer を呼び出します。
+
 ## JSON Schemaの統合
 
 BEAR.ResourceのJSON Schemaを使用してパラメータ定義を強化できます。
@@ -521,6 +566,7 @@ Dispatcherが検出するエラー:
 | `StreamingAgentInterface` | ストリーミングエージェントランタイム |
 | `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
 | `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
+| `ToolCallObserverInterface` | ディスパッチごとに 1 回呼ばれるフック（監査・メトリクス・レイテンシ計測） |
 
 ### 主要クラス
 
