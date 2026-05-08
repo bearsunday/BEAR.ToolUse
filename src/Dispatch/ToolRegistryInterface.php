@@ -4,12 +4,8 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Dispatch;
 
-use BEAR\ToolUse\Types;
-
 /**
  * Registry for tool name to resource mapping
- *
- * @psalm-import-type ToolMapping from Types
  */
 interface ToolRegistryInterface
 {
@@ -25,10 +21,8 @@ interface ToolRegistryInterface
 
     /**
      * Get mapping for a tool name
-     *
-     * @return ToolMapping|null
      */
-    public function get(string $toolName): array|null;
+    public function get(string $toolName): ToolMapping|null;
 
     /**
      * Check if a tool is registered

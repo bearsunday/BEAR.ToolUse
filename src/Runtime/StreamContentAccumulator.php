@@ -13,7 +13,6 @@ use function json_decode;
 /**
  * Accumulates stream events into content blocks and iteration state
  *
- * @psalm-import-type PendingToolCall from Types
  * @psalm-import-type ContentBlock from Types
  */
 final class StreamContentAccumulator
@@ -119,11 +118,11 @@ final class StreamContentAccumulator
     private function finalizeContentBlock(): void
     {
         if ($this->currentToolName !== '') {
-            $this->pendingToolCalls[] = [
-                'id' => $this->currentToolId,
-                'name' => $this->currentToolName,
-                'inputJson' => $this->currentToolInputJson,
-            ];
+            $this->pendingToolCalls[] = new PendingToolCall(
+                $this->currentToolId,
+                $this->currentToolName,
+                $this->currentToolInputJson,
+            );
             /** @var array<string, mixed> $input */
             $input = (array) json_decode($this->currentToolInputJson, true);
             $this->contentBlocks[] = [

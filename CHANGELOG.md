@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ToolUseModule` for Ray.Di binding configuration
 
 ### Changed
+- Promoted internal `ToolMapping` and `PendingToolCall` from `@psalm-type` array shapes to dedicated `final readonly` value objects (`BEAR\ToolUse\Dispatch\ToolMapping`, `BEAR\ToolUse\Runtime\PendingToolCall`). Producers and consumers were the only ones each, both internal — no public-API impact unless you implemented `ToolRegistryInterface` yourself, in which case `get()` now returns `ToolMapping|null` instead of an array shape.
 - **BREAKING**: `AlpsSemanticDictionary` now takes a profile file path (`string`) instead of a `Koriym\AppStateDiagram\Profile` instance.
 
   ```php

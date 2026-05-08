@@ -64,8 +64,8 @@ final class ToolCollectorTest extends TestCase
 
         $mapping = $this->registry->get('article_get');
         $this->assertNotNull($mapping);
-        $this->assertSame('app://self/article', $mapping['resourceUri']);
-        $this->assertSame('get', $mapping['method']);
+        $this->assertSame('app://self/article', $mapping->resourceUri);
+        $this->assertSame('get', $mapping->method);
     }
 
     public function testCustomToolNameFallsBackToGet(): void
@@ -74,7 +74,7 @@ final class ToolCollectorTest extends TestCase
 
         $mapping = $this->registry->get('my_custom_tool');
         $this->assertNotNull($mapping);
-        $this->assertSame('get', $mapping['method']);
+        $this->assertSame('get', $mapping->method);
     }
 
     public function testPathWithHyphensConverted(): void
@@ -85,7 +85,7 @@ final class ToolCollectorTest extends TestCase
 
         $mapping = $this->registry->get('my_article_get');
         $this->assertNotNull($mapping);
-        $this->assertSame('app://self/my-article', $mapping['resourceUri']);
+        $this->assertSame('app://self/my-article', $mapping->resourceUri);
     }
 
     public function testFullUriStoredInRegistry(): void
@@ -94,7 +94,7 @@ final class ToolCollectorTest extends TestCase
 
         $mapping = $this->registry->get('article_get');
         $this->assertNotNull($mapping);
-        $this->assertSame('app://self/article', $mapping['resourceUri']);
+        $this->assertSame('app://self/article', $mapping->resourceUri);
     }
 
     public function testCustomToolNameWithMethodSuffix(): void
@@ -103,7 +103,7 @@ final class ToolCollectorTest extends TestCase
 
         $mapping = $this->registry->get('custom_action_post');
         $this->assertNotNull($mapping);
-        $this->assertSame('post', $mapping['method']);
+        $this->assertSame('post', $mapping->method);
     }
 
     public function testDifferentSchemes(): void
@@ -113,7 +113,7 @@ final class ToolCollectorTest extends TestCase
         $this->assertCount(1, $tools);
         $mapping = $this->registry->get('article_get');
         $this->assertNotNull($mapping);
-        $this->assertSame('page://self/article', $mapping['resourceUri']);
+        $this->assertSame('page://self/article', $mapping->resourceUri);
     }
 
     public function testFilterPropagatedToRegistry(): void
@@ -122,6 +122,6 @@ final class ToolCollectorTest extends TestCase
 
         $mapping = $this->registry->get('filtered_get');
         $this->assertNotNull($mapping);
-        $this->assertSame(FakeSummaryFilter::class, $mapping['filter']);
+        $this->assertSame(FakeSummaryFilter::class, $mapping->filter);
     }
 }

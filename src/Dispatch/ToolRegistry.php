@@ -4,16 +4,12 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Dispatch;
 
-use BEAR\ToolUse\Types;
 use Override;
 
-use function array_key_exists;
 use function array_keys;
 
 /**
  * Registry for tool name to resource mapping
- *
- * @psalm-import-type ToolMapping from Types
  */
 final class ToolRegistry implements ToolRegistryInterface
 {
@@ -31,37 +27,19 @@ final class ToolRegistry implements ToolRegistryInterface
     #[Override]
     public function register(string $toolName, string $resourceUri, string $method, string|null $filter = null): void
     {
-        $mapping = [
-            'resourceUri' => $resourceUri,
-            'method' => $method,
-        ];
-
-        if ($filter !== null) {
-            $mapping['filter'] = $filter;
-        }
-
-        $this->mappings[$toolName] = $mapping;
+        $this->mappings[$toolName] = new ToolMapping($resourceUri, $method, $filter);
     }
 
-    /**
-     * Get mapping for a tool name
-     *
-     * @return ToolMapping|null
-     */
     #[Override]
-    public function get(string $toolName): array|null
+    public function get(string $toolName): ToolMapping|null
     {
-        if (! array_key_exists($toolName, $this->mappings)) {
-            return null;
-        }
-
-        return $this->mappings[$toolName];
+        return $this->mappings[$toolName] ?? null;
     }
 
     #[Override]
     public function has(string $toolName): bool
     {
-        return array_key_exists($toolName, $this->mappings);
+        return isset($this->mappings[$toolName]);
     }
 
     /** @return list<string> */

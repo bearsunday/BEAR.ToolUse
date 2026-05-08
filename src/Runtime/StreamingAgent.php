@@ -10,7 +10,6 @@ use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
 use BEAR\ToolUse\Schema\Tool;
-use BEAR\ToolUse\Types;
 use Generator;
 use Override;
 use Throwable;
@@ -27,8 +26,6 @@ use function json_decode;
  * For confirmable tools, yields AgentEvent::CONFIRMATION_REQUIRED and
  * receives approval via Generator::send(bool). If send() is not called
  * (e.g. iterator_to_array), the tool is denied by default (safe default).
- *
- * @psalm-import-type PendingToolCall from Types
  */
 final class StreamingAgent implements StreamingAgentInterface
 {
@@ -159,10 +156,10 @@ final class StreamingAgent implements StreamingAgentInterface
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
             /** @var array<string, mixed> $input */
-            $input = (array) json_decode($pending['inputJson'], true);
+            $input = (array) json_decode($pending->inputJson, true);
             $toolCall = new ToolCall(
-                id: $pending['id'],
-                name: $pending['name'],
+                id: $pending->id,
+                name: $pending->name,
                 input: $input,
             );
 
@@ -179,7 +176,7 @@ final class StreamingAgent implements StreamingAgentInterface
                     $result = ToolResult::cancelled($toolCall->id);
                     $toolResults[] = $result;
 
-                    yield AgentEvent::toolResult($pending['name']);
+                    yield AgentEvent::toolResult($pending->name);
 
                     continue;
                 }
@@ -193,7 +190,7 @@ final class StreamingAgent implements StreamingAgentInterface
 
             $toolResults[] = $result;
 
-            yield AgentEvent::toolResult($pending['name']);
+            yield AgentEvent::toolResult($pending->name);
         }
 
         return $toolResults;
