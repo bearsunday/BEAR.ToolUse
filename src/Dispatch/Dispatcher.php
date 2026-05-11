@@ -56,8 +56,8 @@ final readonly class Dispatcher implements DispatcherInterface
 
         try {
             $ro = $this->invokeResource(
-                $mapping['resourceUri'],
-                $mapping['method'],
+                $mapping->resourceUri,
+                $mapping->method,
                 $toolCall->input,
             );
 
@@ -72,9 +72,8 @@ final readonly class Dispatcher implements DispatcherInterface
 
             /** @var mixed $body */
             $body = $ro->body;
-            if (isset($mapping['filter'])) {
-                /** @var class-string<ToolResultFilterInterface> $filterClass */
-                $filterClass = $mapping['filter'];
+            if ($mapping->filter !== null) {
+                $filterClass = $mapping->filter;
                 /** @var mixed $body */
                 $body = (new $filterClass())($body);
             }

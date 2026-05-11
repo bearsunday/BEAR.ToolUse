@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ToolUseModule` for Ray.Di binding configuration
 
 ### Changed
+- **BREAKING (interface implementers only)**: `ToolRegistryInterface::get()` now returns `BEAR\ToolUse\Dispatch\ToolMapping|null` instead of an `array{resourceUri: string, method: string, filter?: class-string}|null` shape. Direct `ToolRegistry` users are unaffected (`register()` signature is unchanged). Internal `PendingToolCall` (used by the streaming pipeline) was likewise promoted from `@psalm-type` to `BEAR\ToolUse\Runtime\PendingToolCall` — `final readonly class`. Both promotions remove static-only Psalm enforcement in favor of runtime type safety; consumer code switches from `$mapping['filter'] ?? null` style to property access.
 - **BREAKING**: `AlpsSemanticDictionary` now takes a profile file path (`string`) instead of a `Koriym\AppStateDiagram\Profile` instance.
 
   ```php

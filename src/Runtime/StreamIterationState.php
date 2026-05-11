@@ -9,7 +9,6 @@ use BEAR\ToolUse\Types;
 /**
  * State accumulated during a single streaming iteration
  *
- * @psalm-import-type PendingToolCall from Types
  * @psalm-import-type ContentBlock from Types
  */
 final readonly class StreamIterationState

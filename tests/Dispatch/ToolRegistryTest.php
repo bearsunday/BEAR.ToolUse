@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(ToolRegistry::class)]
+#[CoversClass(ToolMapping::class)]
 final class ToolRegistryTest extends TestCase
 {
     private ToolRegistry $registry;
@@ -25,8 +26,8 @@ final class ToolRegistryTest extends TestCase
         $mapping = $this->registry->get('article_get');
 
         $this->assertNotNull($mapping);
-        $this->assertSame('article', $mapping['resourceUri']);
-        $this->assertSame('get', $mapping['method']);
+        $this->assertSame('article', $mapping->resourceUri);
+        $this->assertSame('get', $mapping->method);
     }
 
     public function testHas(): void
@@ -63,18 +64,18 @@ final class ToolRegistryTest extends TestCase
         $mapping = $this->registry->get('search_get');
 
         $this->assertNotNull($mapping);
-        $this->assertSame('search', $mapping['resourceUri']);
-        $this->assertSame('get', $mapping['method']);
-        $this->assertSame(FakeSummaryFilter::class, $mapping['filter']);
+        $this->assertSame('search', $mapping->resourceUri);
+        $this->assertSame('get', $mapping->method);
+        $this->assertSame(FakeSummaryFilter::class, $mapping->filter);
     }
 
-    public function testRegisterWithoutFilterOmitsKey(): void
+    public function testRegisterWithoutFilterDefaultsToNull(): void
     {
         $this->registry->register('article_get', 'article', 'get');
 
         $mapping = $this->registry->get('article_get');
 
         $this->assertNotNull($mapping);
-        $this->assertArrayNotHasKey('filter', $mapping);
+        $this->assertNull($mapping->filter);
     }
 }
