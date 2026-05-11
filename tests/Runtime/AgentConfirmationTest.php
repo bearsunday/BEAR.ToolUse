@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Runtime;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
+use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeConfirmationHandler;
 use BEAR\ToolUse\Fake\FakeLlmClient;
@@ -32,7 +33,7 @@ final class AgentConfirmationTest extends TestCase
         $registry = new ToolRegistry();
         $registry->register('article_get', 'app://self/article', 'get');
         $registry->register('article_delete', 'app://self/article', 'delete');
-        $this->dispatcher = new Dispatcher($resource, $registry);
+        $this->dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
     }
 
     public function testConfirmationApproved(): void

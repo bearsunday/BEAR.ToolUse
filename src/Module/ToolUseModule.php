@@ -6,6 +6,8 @@ namespace BEAR\ToolUse\Module;
 
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
+use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolCallObserverInterface;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use BEAR\ToolUse\Schema\JsonSchemaRepository;
@@ -53,6 +55,9 @@ final class ToolUseModule extends AbstractModule
 
         // Tool Collector
         $this->bind(ToolCollectorInterface::class)->to(ToolCollector::class);
+
+        // Tool Call Observer (default no-op; users can override with their own implementation)
+        $this->bind(ToolCallObserverInterface::class)->to(NullToolCallObserver::class);
 
         // Dispatcher
         $this->bind(DispatcherInterface::class)->to(Dispatcher::class);

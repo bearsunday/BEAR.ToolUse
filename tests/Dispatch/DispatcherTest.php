@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Dispatch;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Fake\FakeSummaryFilter;
+use BEAR\ToolUse\Fake\FakeToolCallObserver;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
@@ -18,6 +19,7 @@ final class DispatcherTest extends TestCase
 {
     private Dispatcher $dispatcher;
     private ToolRegistry $registry;
+    private FakeToolCallObserver $observer;
 
     protected function setUp(): void
     {
@@ -25,7 +27,8 @@ final class DispatcherTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
 
         $this->registry = new ToolRegistry();
-        $this->dispatcher = new Dispatcher($resource, $this->registry);
+        $this->observer = new FakeToolCallObserver();
+        $this->dispatcher = new Dispatcher($resource, $this->registry, $this->observer);
     }
 
     public function testDispatchUnknownTool(): void
@@ -246,5 +249,82 @@ final class DispatcherTest extends TestCase
         $this->assertFalse($result->isError);
         // Without filter, body text should be present
         $this->assertStringContainsString('Long body text', $result->content);
+    }
+
+    public function testObserverInvokedOnSuccess(): void
+    {
+        $this->registry->register('crud_get', 'app://self/crud', 'get');
+        $toolCall = new ToolCall('call_obs_success', 'crud_get', ['id' => 1]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertCount(1, $this->observer->calls);
+        $call = $this->observer->calls[0];
+        $this->assertSame($toolCall, $call['toolCall']);
+        $this->assertSame($result, $call['result']);
+        $this->assertFalse($call['result']->isError);
+        $this->assertGreaterThan(0.0, $call['durationMs']);
+    }
+
+    public function testObserverInvokedOnStatusError(): void
+    {
+        $this->registry->register('status_error_get', 'app://self/status-error', 'get');
+        $toolCall = new ToolCall('call_obs_status', 'status_error_get', ['code' => 400]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertCount(1, $this->observer->calls);
+        $call = $this->observer->calls[0];
+        $this->assertSame($toolCall, $call['toolCall']);
+        $this->assertSame($result, $call['result']);
+        $this->assertTrue($call['result']->isError);
+        $this->assertStringContainsString('400:', $call['result']->content);
+        $this->assertGreaterThan(0.0, $call['durationMs']);
+    }
+
+    public function testObserverInvokedOnException(): void
+    {
+        $this->registry->register('error_get', 'app://self/error', 'get');
+        $toolCall = new ToolCall('call_obs_exception', 'error_get', []);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertCount(1, $this->observer->calls);
+        $call = $this->observer->calls[0];
+        $this->assertSame($toolCall, $call['toolCall']);
+        $this->assertSame($result, $call['result']);
+        $this->assertTrue($call['result']->isError);
+        $this->assertStringContainsString('RuntimeException', $call['result']->content);
+        $this->assertGreaterThan(0.0, $call['durationMs']);
+    }
+
+    public function testObserverInvokedOnUnknownTool(): void
+    {
+        $toolCall = new ToolCall('call_obs_unknown', 'unknown_tool', []);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertCount(1, $this->observer->calls);
+        $call = $this->observer->calls[0];
+        $this->assertSame($toolCall, $call['toolCall']);
+        $this->assertSame($result, $call['result']);
+        $this->assertTrue($call['result']->isError);
+        $this->assertStringContainsString('Unknown tool', $call['result']->content);
+        $this->assertGreaterThan(0.0, $call['durationMs']);
+    }
+
+    public function testObserverReceivesPostFilterResult(): void
+    {
+        $this->registry->register('filtered_get', 'app://self/filtered', 'get', FakeSummaryFilter::class);
+        $toolCall = new ToolCall('call_obs_filter', 'filtered_get', ['id' => 1]);
+
+        $result = $this->dispatcher->dispatch($toolCall);
+
+        $this->assertCount(1, $this->observer->calls);
+        $call = $this->observer->calls[0];
+        $this->assertSame($result, $call['result']);
+        // Observer must see the filtered content (what the LLM sees), not the raw body.
+        $this->assertStringContainsString('"title":"Article 1"', $call['result']->content);
+        $this->assertStringNotContainsString('Long body text', $call['result']->content);
     }
 }

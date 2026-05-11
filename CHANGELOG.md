@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.0] - Unreleased
 
 ### Added
+- `ToolCallObserverInterface` invoked once per `Dispatcher` dispatch (success, status>=400, exception, unknown tool) with `ToolCall`, `ToolResult` (post-filter), and elapsed `durationMs`. `ToolUseModule` binds `NullToolCallObserver` (no-op) by default; applications can override the binding to plug in audit logging, metrics, or latency tracking.
 - Resource classes as AI agent tools via `#[Tool]` attribute
 - `#[Exclude]` attribute to exclude methods/classes from tool exposure
 - `#[Tool(confirm: true)]` for human-in-the-loop confirmation on destructive operations

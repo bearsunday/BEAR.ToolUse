@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Runtime;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
+use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
@@ -32,7 +33,7 @@ final class AgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('article_get', 'article', 'get');
-        $dispatcher = new Dispatcher($resource, $registry);
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
 
         $tools = [
             new Tool('article_get', 'Get an article', [
@@ -287,7 +288,7 @@ final class AgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('error_get', 'app://self/error', 'get');
-        $dispatcher = new Dispatcher($resource, $registry);
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
 
         $tools = [
             new Tool('error_get', 'Get error resource', [
@@ -336,7 +337,7 @@ final class AgentTest extends TestCase
         $registry = new ToolRegistry();
         $registry->register('error_get', 'app://self/error', 'get');
         $registry->register('article_get', 'app://self/article', 'get');
-        $dispatcher = new Dispatcher($resource, $registry);
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
 
         $tools = [
             new Tool('error_get', 'Get error resource', [
@@ -394,7 +395,7 @@ final class AgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('status_error_get', 'app://self/status-error', 'get');
-        $dispatcher = new Dispatcher($resource, $registry);
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
 
         $tools = [
             new Tool('status_error_get', 'Get status error resource', [
