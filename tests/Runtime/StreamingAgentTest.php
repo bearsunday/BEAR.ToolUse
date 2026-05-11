@@ -7,6 +7,7 @@ namespace BEAR\ToolUse\Runtime;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
+use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Fake\FakeThrowingDispatcher;
@@ -39,7 +40,7 @@ final class StreamingAgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('article_get', 'article', 'get');
-        $dispatcher = new Dispatcher($resource, $registry);
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
 
         $tools = [
             new Tool('article_get', 'Get an article', [

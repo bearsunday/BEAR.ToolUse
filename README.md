@@ -375,6 +375,55 @@ class Article extends ResourceObject
 
 Filters are only applied to success responses. Error responses (status code >= 400) are sent unfiltered.
 
+## Observing Tool Calls
+
+Hook into every tool call to record audit logs, emit metrics, or measure latency. The observer is invoked once per dispatch — across success, status-code errors, exceptions, and unknown-tool paths — receiving the `ToolCall`, the `ToolResult`, and the elapsed time in milliseconds.
+
+### Implement an Observer
+
+```php
+use BEAR\ToolUse\Dispatch\ToolCall;
+use BEAR\ToolUse\Dispatch\ToolCallObserverInterface;
+use BEAR\ToolUse\Dispatch\ToolResult;
+use Override;
+
+final readonly class AuditLogObserver implements ToolCallObserverInterface
+{
+    public function __construct(
+        private LoggerInterface $logger,
+    ) {}
+
+    #[Override]
+    public function observe(ToolCall $toolCall, ToolResult $result, float $durationMs): void
+    {
+        $this->logger->info('tool_call', [
+            'name' => $toolCall->name,
+            'input' => $toolCall->input,
+            'isError' => $result->isError,
+            'durationMs' => $durationMs,
+        ]);
+    }
+}
+```
+
+> **Note:** `$toolCall->input` and `$result->content` may contain sensitive values (PII, credentials, API tokens) depending on the underlying resource. Sanitize or redact such fields before writing to persistent logs, traces, or external systems.
+
+### Bind in DI Module
+
+```php
+$this->bind(ToolCallObserverInterface::class)->to(AuditLogObserver::class);
+```
+
+If no observer is bound, `NullToolCallObserver` (a no-op) is used by default.
+
+### Design Notes
+
+- The observer receives the `ToolResult` **after** the response filter has been applied — i.e. exactly what the LLM will see.
+- The interface is intentionally minimal. Application-level context (thread/conversation IDs, user ID, etc.) belongs in your own stateful observer implementation, not in the interface signature.
+- `Dispatcher` ensures the observer is called exactly once per dispatch, regardless of which branch produced the result.
+- **Cancelled tool calls bypass the Dispatcher entirely.** Confirmation denial is handled at the `Agent` / `StreamingAgent` layer (via `ConfirmationHandlerInterface` or `Generator::send(false)`), which returns `ToolResult::cancelled()` without calling `Dispatcher::dispatch()`. The observer is therefore **not** invoked for cancellations.
+- **Exceptions thrown from `observe()` propagate out of `Dispatcher::dispatch()`.** Observer implementations are responsible for handling their own errors (e.g. wrapping persistence calls in try/catch) if observation failures should not break tool dispatch.
+
 ## JSON Schema Integration
 
 Use BEAR.Resource's JSON Schema for enhanced parameter definitions.
@@ -521,6 +570,7 @@ Errors detected by the Dispatcher:
 | `StreamingAgentInterface` | Streaming agent runtime |
 | `ToolResultFilterInterface` | Response filter before sending to LLM |
 | `ConfirmationHandlerInterface` | User confirmation for destructive tools |
+| `ToolCallObserverInterface` | Hook invoked once per tool dispatch (audit, metrics, latency) |
 
 ### Main Classes
 

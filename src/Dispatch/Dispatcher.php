@@ -9,6 +9,7 @@ use BEAR\Resource\ResourceObject;
 use Override;
 use Throwable;
 
+use function hrtime;
 use function json_encode;
 use function sprintf;
 use function strtoupper;
@@ -23,15 +24,27 @@ use const JSON_UNESCAPED_UNICODE;
 final readonly class Dispatcher implements DispatcherInterface
 {
     private const ERROR_STATUS_THRESHOLD = 400;
+    private const NANOS_PER_MILLI = 1_000_000;
 
     public function __construct(
         private ResourceInterface $resource,
         private ToolRegistryInterface $registry,
+        private ToolCallObserverInterface $observer,
     ) {
     }
 
     #[Override]
     public function dispatch(ToolCall $toolCall): ToolResult
+    {
+        $startedAt = hrtime(true);
+        $result = $this->resolve($toolCall);
+        $durationMs = (hrtime(true) - $startedAt) / self::NANOS_PER_MILLI;
+        $this->observer->observe($toolCall, $result, $durationMs);
+
+        return $result;
+    }
+
+    private function resolve(ToolCall $toolCall): ToolResult
     {
         $mapping = $this->registry->get($toolCall->name);
         if ($mapping === null) {

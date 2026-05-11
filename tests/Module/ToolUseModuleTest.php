@@ -7,6 +7,8 @@ namespace BEAR\ToolUse\Module;
 use BEAR\Resource\Module\JsonSchemaModule as ResourceJsonSchemaModule;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
+use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolCallObserverInterface;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use BEAR\ToolUse\Schema\JsonSchemaRepositoryInterface;
 use BEAR\ToolUse\Schema\SchemaConverterInterface;
@@ -37,6 +39,10 @@ final class ToolUseModuleTest extends TestCase
         $this->assertInstanceOf(
             DispatcherInterface::class,
             $injector->getInstance(DispatcherInterface::class),
+        );
+        $this->assertInstanceOf(
+            NullToolCallObserver::class,
+            $injector->getInstance(ToolCallObserverInterface::class),
         );
     }
 
