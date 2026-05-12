@@ -13,11 +13,15 @@ use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 
+use function array_map;
+
 #[CoversClass(Agent::class)]
+#[CoversClass(AgentOptions::class)]
 #[CoversClass(AgentResponse::class)]
 #[CoversClass(Message::class)]
 final class AgentTest extends TestCase
@@ -121,6 +125,65 @@ final class AgentTest extends TestCase
 
         $this->assertTrue($response->completed);
         $this->assertSame('I found the article!', $response->getText());
+    }
+
+    public function testRunWithToolFilteringPassesOnlyEnabledTools(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgentWithArticleAndErrorTools($llmClient);
+
+        $llmClient->queueTextResponse('Done.');
+
+        $response = $agent->run('Use limited tools', AgentOptions::withTools(['article_get']));
+
+        $this->assertTrue($response->completed);
+        $this->assertSame(['article_get'], array_map(
+            static fn (Tool $tool): string => $tool->name,
+            $llmClient->calls[0]['tools'],
+        ));
+    }
+
+    public function testRunWithToolFilteringPassesOnlyEnabledToolsAfterToolUse(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgentWithArticleAndErrorTools($llmClient);
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+        $llmClient->queueTextResponse('Done.');
+
+        $response = $agent->run('Use limited tools', AgentOptions::withTools(['article_get']));
+
+        $this->assertTrue($response->completed);
+        $this->assertCount(2, $llmClient->calls);
+        $this->assertSame(['article_get'], array_map(
+            static fn (Tool $tool): string => $tool->name,
+            $llmClient->calls[1]['tools'],
+        ));
+    }
+
+    public function testRunWithUnknownToolFilterThrows(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unknown tool(s): missing_tool');
+
+        $this->agent->run('Use missing tool', AgentOptions::withTools(['missing_tool']));
+    }
+
+    public function testRunWithDisabledToolCallReturnsErrorWithoutDispatching(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgentWithArticleAndErrorTools($llmClient);
+
+        $llmClient->queueToolUseResponse('call_1', 'error_get', []);
+        $llmClient->queueTextResponse('The disabled tool was not used.');
+
+        $response = $agent->run('Try disabled tool', AgentOptions::withTools(['article_get']));
+
+        $this->assertTrue($response->completed);
+        $this->assertSame('The disabled tool was not used.', $response->getText());
+        $toolResultMessage = $llmClient->calls[1]['messages'][2];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
     }
 
     public function testMessageUser(): void
@@ -429,5 +492,34 @@ final class AgentTest extends TestCase
         $this->assertTrue($toolResultMessage->content[0]['is_error']);
         $this->assertStringContainsString('400:', $toolResultMessage->content[0]['content']);
         $this->assertStringContainsString('Validation failed', $toolResultMessage->content[0]['content']);
+    }
+
+    private function createAgentWithArticleAndErrorTools(FakeLlmClient $llmClient): Agent
+    {
+        $injector = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource = $injector->getInstance(ResourceInterface::class);
+        $registry = new ToolRegistry();
+        $registry->register('article_get', 'app://self/article', 'get');
+        $registry->register('error_get', 'app://self/error', 'get');
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+
+        return new Agent(
+            client: $llmClient,
+            dispatcher: $dispatcher,
+            tools: [
+                new Tool('article_get', 'Get an article', [
+                    'type' => 'object',
+                    'properties' => ['id' => ['type' => 'integer']],
+                    'required' => ['id'],
+                ]),
+                new Tool('error_get', 'Get error resource', [
+                    'type' => 'object',
+                    'properties' => [],
+                    'required' => [],
+                ]),
+            ],
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
     }
 }

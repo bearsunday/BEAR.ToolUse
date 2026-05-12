@@ -134,7 +134,95 @@ if ($response->completed) {
 }
 ```
 
-### 5. Conversation History
+### 5. Per-call Tool Filtering
+
+Use `AgentOptions` to limit the tools available for a single run. This does not change the collected resource registry; it only narrows the tools sent to the LLM for that invocation.
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+
+$response = $agent->run(
+    'Please search articles, but do not modify anything.',
+    AgentOptions::withTools(['article_get', 'search_get']),
+);
+```
+
+Unknown tool names fail fast, so typos or policy mistakes are detected before the LLM call.
+
+The same option is available for streaming:
+
+```php
+foreach ($agent->runStream('Search articles', AgentOptions::withTools(['search_get'])) as $event) {
+    // ...
+}
+```
+
+### 6. Input/Output Processors
+
+Processors let you extend each LLM call without making the agent runtime larger. Input processors can rewrite the system prompt, messages, or tools before the LLM call. Output processors can inspect or rewrite the LLM response after the call. They run on every iteration, including calls after tool results.
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\InputProcessorInterface;
+use BEAR\ToolUse\Runtime\LlmRequest;
+use BEAR\ToolUse\Runtime\Message;
+
+final class MemoryProcessor implements InputProcessorInterface
+{
+    public function process(LlmRequest $request): LlmRequest
+    {
+        return $request->withMessages([
+            ...$request->messages,
+            Message::user('Known context: the user prefers concise answers.'),
+        ]);
+    }
+}
+
+$response = $agent->run(
+    'Summarize this article',
+    AgentOptions::withProcessors(inputProcessors: [new MemoryProcessor()]),
+);
+```
+
+`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents.
+
+### 7. Agent-as-Tool / Named Subagents
+
+Register specialist agents in an `AgentPool`, then expose them as tools named `ask_{name}`. Subagent conversation history is isolated per call.
+
+```php
+use BEAR\ToolUse\Runtime\AgentDelegator;
+use BEAR\ToolUse\Runtime\AgentFactory;
+use BEAR\ToolUse\Runtime\AgentPool;
+use BEAR\ToolUse\Runtime\AgentProfile;
+
+$pool = new AgentPool($llmClient, $resourceDispatcher, $collector);
+$pool->register(new AgentProfile(
+    name: 'critic',
+    description: 'Review design risks',
+    systemPrompt: 'You are a critical reviewer.',
+    resources: ['app://self/article'],
+));
+
+$delegator = new AgentDelegator($pool, $resourceDispatcher);
+$factory = new AgentFactory($llmClient, $delegator, $collector, $registry);
+
+$agent = $factory
+    ->addResources(['app://self/article'])
+    ->addSubagents($pool)
+    ->create('You are a coordinator.');
+
+// When the LLM calls ask_critic, AgentDelegator runs the critic agent and
+// feeds the result back as a normal tool_result.
+```
+
+You can also call a subagent directly:
+
+```php
+$response = $delegator->ask('critic', 'What are the risks?', ['articleId' => 1]);
+```
+
+### 8. Conversation History
 
 The agent maintains conversation history across multiple `run()` calls.
 
@@ -156,7 +244,7 @@ $response = $agent->run('Tell me more about this user');
 $agent->reset();
 ```
 
-### 6. Streaming Agent
+### 9. Streaming Agent
 
 For real-time output (SSE, WebSocket), use the streaming agent. It yields events as the LLM generates output.
 
@@ -569,6 +657,8 @@ Errors detected by the Dispatcher:
 | `AgentInterface` | Agent runtime |
 | `StreamingAgentInterface` | Streaming agent runtime |
 | `ToolResultFilterInterface` | Response filter before sending to LLM |
+| `InputProcessorInterface` | Processes each LLM request before the call |
+| `OutputProcessorInterface` | Processes each LLM response or stream event after the call |
 | `ConfirmationHandlerInterface` | User confirmation for destructive tools |
 | `ToolCallObserverInterface` | Hook invoked once per tool dispatch (audit, metrics, latency) |
 
@@ -579,6 +669,11 @@ Errors detected by the Dispatcher:
 | `Agent` | Manages conversation loop with LLM |
 | `StreamingAgent` | Streaming conversation loop yielding `AgentEvent` |
 | `AgentFactory` | Builder for agents (sync and streaming) |
+| `AgentOptions` | Per-run options such as tool filtering |
+| `LlmRequest` | LLM request passed to input processors |
+| `AgentProfile` | Configuration for a named subagent |
+| `AgentPool` | Registry and factory for named subagents |
+| `AgentDelegator` | Dispatches `ask_*` tool calls to subagents |
 | `AgentResponse` | Agent execution result (sync) |
 | `AgentEvent` | Streaming event (`JsonSerializable`) |
 | `StreamEvent` | Low-level LLM stream event |

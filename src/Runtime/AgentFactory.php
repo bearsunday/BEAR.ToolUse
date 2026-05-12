@@ -39,9 +39,34 @@ final class AgentFactory
     public function addResources(array $uris): self
     {
         $tools = $this->collector->collect($uris);
+
+        return $this->addTools($tools);
+    }
+
+    /**
+     * Add already-built tools.
+     *
+     * @param list<Tool> $tools
+     *
+     * @return $this
+     */
+    public function addTools(array $tools): self
+    {
         foreach ($tools as $tool) {
             $this->tools[] = $tool;
         }
+
+        return $this;
+    }
+
+    /**
+     * Add named subagents as tools.
+     *
+     * @return $this
+     */
+    public function addSubagents(AgentPool $pool): self
+    {
+        $this->addTools($pool->getTools());
 
         return $this;
     }

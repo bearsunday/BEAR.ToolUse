@@ -134,7 +134,95 @@ if ($response->completed) {
 }
 ```
 
-### 5. 会話履歴
+### 5. 呼び出し単位のツール制限
+
+`AgentOptions` を使うと、1回の `run()` で利用できるツールを制限できます。収集済みの Resource registry は変更せず、その呼び出しで LLM に渡す tool list だけを絞ります。
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+
+$response = $agent->run(
+    '記事を検索してください。変更はしないでください。',
+    AgentOptions::withTools(['article_get', 'search_get']),
+);
+```
+
+存在しない tool 名を指定した場合は、LLM 呼び出し前に例外になります。typo や policy 設定ミスを早期に検出できます。
+
+Streaming Agent でも同じ option を使えます。
+
+```php
+foreach ($agent->runStream('記事を検索して', AgentOptions::withTools(['search_get'])) as $event) {
+    // ...
+}
+```
+
+### 6. Input/Output Processor
+
+Processor を使うと、Agent runtime を肥大化させずに各 LLM 呼び出しを拡張できます。Input Processor は LLM 呼び出し前に system prompt、messages、tools を加工できます。Output Processor は LLM 呼び出し後の response を検査・正規化できます。tool result 後の再問い合わせを含め、各 iteration で毎回適用されます。
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\InputProcessorInterface;
+use BEAR\ToolUse\Runtime\LlmRequest;
+use BEAR\ToolUse\Runtime\Message;
+
+final class MemoryProcessor implements InputProcessorInterface
+{
+    public function process(LlmRequest $request): LlmRequest
+    {
+        return $request->withMessages([
+            ...$request->messages,
+            Message::user('既知の文脈: ユーザーは簡潔な回答を好む。'),
+        ]);
+    }
+}
+
+$response = $agent->run(
+    'この記事を要約して',
+    AgentOptions::withProcessors(inputProcessors: [new MemoryProcessor()]),
+);
+```
+
+`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。
+
+### 7. Agent-as-Tool / Named Subagent
+
+専門エージェントを `AgentPool` に登録すると、`ask_{name}` という tool として公開できます。Subagent の会話履歴は呼び出しごとに隔離されます。
+
+```php
+use BEAR\ToolUse\Runtime\AgentDelegator;
+use BEAR\ToolUse\Runtime\AgentFactory;
+use BEAR\ToolUse\Runtime\AgentPool;
+use BEAR\ToolUse\Runtime\AgentProfile;
+
+$pool = new AgentPool($llmClient, $resourceDispatcher, $collector);
+$pool->register(new AgentProfile(
+    name: 'critic',
+    description: '設計上のリスクをレビューする',
+    systemPrompt: 'You are a critical reviewer.',
+    resources: ['app://self/article'],
+));
+
+$delegator = new AgentDelegator($pool, $resourceDispatcher);
+$factory = new AgentFactory($llmClient, $delegator, $collector, $registry);
+
+$agent = $factory
+    ->addResources(['app://self/article'])
+    ->addSubagents($pool)
+    ->create('あなたは調整役のエージェントです。');
+
+// LLM が ask_critic を呼ぶと、AgentDelegator が critic agent を実行し、
+// 結果を通常の tool_result として LLM に返します。
+```
+
+Subagent は直接呼び出すこともできます。
+
+```php
+$response = $delegator->ask('critic', 'この設計のリスクは？', ['articleId' => 1]);
+```
+
+### 8. 会話履歴
 
 エージェントは複数の `run()` 呼び出しにわたって会話履歴を保持します。
 
@@ -156,7 +244,7 @@ $response = $agent->run('このユーザーについてもっと教えて');
 $agent->reset();
 ```
 
-### 6. ストリーミングエージェント
+### 9. ストリーミングエージェント
 
 リアルタイム出力（SSE、WebSocket）には、ストリーミングエージェントを使用します。LLMの出力に応じてイベントをyieldします。
 
@@ -569,6 +657,8 @@ Dispatcherが検出するエラー:
 | `AgentInterface` | エージェントランタイム |
 | `StreamingAgentInterface` | ストリーミングエージェントランタイム |
 | `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
+| `InputProcessorInterface` | LLM 呼び出し前に request を処理 |
+| `OutputProcessorInterface` | LLM 呼び出し後に response または stream event を処理 |
 | `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
 | `ToolCallObserverInterface` | ディスパッチごとに 1 回呼ばれるフック（監査・メトリクス・レイテンシ計測） |
 
@@ -579,6 +669,11 @@ Dispatcherが検出するエラー:
 | `Agent` | LLMとの会話ループを管理 |
 | `StreamingAgent` | `AgentEvent`をyieldするストリーミング会話ループ |
 | `AgentFactory` | エージェントのビルダー（同期・ストリーミング） |
+| `AgentOptions` | ツール制限などの呼び出し単位オプション |
+| `LlmRequest` | Input Processor に渡される LLM request |
+| `AgentProfile` | Named Subagent の設定 |
+| `AgentPool` | Named Subagent の登録・作成 |
+| `AgentDelegator` | `ask_*` tool call を Subagent に委譲 |
 | `AgentResponse` | エージェント実行結果（同期） |
 | `AgentEvent` | ストリーミングイベント（`JsonSerializable`） |
 | `StreamEvent` | 低レベルLLMストリームイベント |
