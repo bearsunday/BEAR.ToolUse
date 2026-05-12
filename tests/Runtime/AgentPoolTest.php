@@ -8,9 +8,11 @@ use BEAR\Resource\FactoryInterface;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
+use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
+use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Schema\SchemaConverter;
 use BEAR\ToolUse\Schema\ToolCollector;
@@ -25,6 +27,7 @@ use function array_map;
 #[CoversClass(AgentProfile::class)]
 #[CoversClass(AgentPool::class)]
 #[CoversClass(AgentDelegator::class)]
+#[CoversClass(AgentFactory::class)]
 final class AgentPoolTest extends TestCase
 {
     public function testRegisterAndGetProfile(): void
@@ -148,6 +151,60 @@ final class AgentPoolTest extends TestCase
         $this->assertSame("Review this.\n\nContext:\n{\"id\":1}", $llmClient->calls[0]['messages'][0]->content[0]['text']);
     }
 
+    public function testDelegatorCanDispatchKnownSubagentToolOnly(): void
+    {
+        [$pool] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+        ));
+        $delegator = new AgentDelegator($pool);
+
+        $this->assertFalse($delegator->canDispatch('article_get'));
+        $this->assertTrue($delegator->canDispatch('ask_critic'));
+        $this->assertFalse($delegator->canDispatch('ask_missing'));
+    }
+
+    public function testDelegatorFallsBackForNonAgentTool(): void
+    {
+        [$pool] = $this->createPool();
+        $fallback = new class implements DispatcherInterface {
+            public function dispatch(ToolCall $toolCall): ToolResult
+            {
+                return ToolResult::success($toolCall->id, 'fallback result');
+            }
+        };
+        $delegator = new AgentDelegator($pool, $fallback);
+
+        $result = $delegator->dispatch(new ToolCall('call_1', 'article_get', []));
+
+        $this->assertFalse($result->isError);
+        $this->assertSame('fallback result', $result->content);
+    }
+
+    public function testDelegatorReturnsUnknownToolWithoutFallback(): void
+    {
+        [$pool] = $this->createPool();
+        $delegator = new AgentDelegator($pool);
+
+        $result = $delegator->dispatch(new ToolCall('call_1', 'article_get', []));
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('Unknown tool: article_get', $result->content);
+    }
+
+    public function testDelegatorReturnsUnknownAgentForAskTool(): void
+    {
+        [$pool] = $this->createPool();
+        $delegator = new AgentDelegator($pool);
+
+        $result = $delegator->dispatch(new ToolCall('call_1', 'ask_missing', ['message' => 'Hi']));
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('Unknown agent: missing', $result->content);
+    }
+
     public function testDelegatorReturnsErrorForInvalidToolInput(): void
     {
         [$pool] = $this->createPool();
@@ -162,6 +219,49 @@ final class AgentPoolTest extends TestCase
 
         $this->assertTrue($result->isError);
         $this->assertSame('Agent tool input "message" must be a string.', $result->content);
+    }
+
+    public function testDelegatorReturnsErrorForInvalidContextInput(): void
+    {
+        [$pool] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+        ));
+        $delegator = new AgentDelegator($pool);
+
+        $stringContext = $delegator->dispatch(new ToolCall('call_1', 'ask_critic', [
+            'message' => 'Review this.',
+            'context' => 'invalid',
+        ]));
+        $listContext = $delegator->dispatch(new ToolCall('call_2', 'ask_critic', [
+            'message' => 'Review this.',
+            'context' => ['invalid'],
+        ]));
+
+        $this->assertTrue($stringContext->isError);
+        $this->assertSame('Agent tool input "context" must be an object.', $stringContext->content);
+        $this->assertTrue($listContext->isError);
+        $this->assertSame('Agent tool input "context" must be an object.', $listContext->content);
+    }
+
+    public function testDelegatorReturnsErrorWhenSubagentDoesNotComplete(): void
+    {
+        [$pool, $llmClient] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+        ));
+        $delegator = new AgentDelegator($pool);
+
+        $llmClient->queueMaxTokensResponse('Partial.');
+
+        $result = $delegator->dispatch(new ToolCall('call_1', 'ask_critic', ['message' => 'Review this.']));
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('Subagent stopped: max_tokens', $result->content);
     }
 
     public function testMainAgentCanCallSubagentAsTool(): void

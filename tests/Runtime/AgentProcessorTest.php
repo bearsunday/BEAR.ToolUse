@@ -14,11 +14,14 @@ use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Fake\FakeOutputProcessor;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Fake\FakeToolFilteringInputProcessor;
+use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
+use Override;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
+use UnexpectedValueException;
 
 use function iterator_to_array;
 
@@ -55,6 +58,26 @@ final class AgentProcessorTest extends TestCase
 
         $this->assertSame(1, $processor->calls);
         $this->assertSame('Processed response.', $response->getText());
+    }
+
+    public function testAgentOutputProcessorMustReturnLlmResponse(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                return new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'wrong type']);
+            }
+        };
+
+        $llmClient->queueTextResponse('Raw response.');
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must return LlmResponse for non-streaming calls.');
+
+        $agent->run('Hello', AgentOptions::withProcessors(outputProcessors: [$processor]));
     }
 
     public function testProcessorsRunOnEveryToolLoopIteration(): void
@@ -121,6 +144,32 @@ final class AgentProcessorTest extends TestCase
         $this->assertSame('stream memory', $llmClient->calls[0]['messages'][1]->content[0]['text']);
         $this->assertSame('Processed', $events[0]->data['text']);
         $this->assertSame('Processed', $events[1]->data['fullText']);
+    }
+
+    public function testStreamingOutputProcessorMustReturnStreamEvent(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        $agent = $this->createStreamingAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                return new LlmResponse('end_turn', [['type' => 'text', 'text' => 'wrong type']], []);
+            }
+        };
+
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Raw']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must return StreamEvent for streaming calls.');
+
+        iterator_to_array($agent->runStream('Hi', AgentOptions::withProcessors(outputProcessors: [$processor])));
     }
 
     private function createAgent(FakeLlmClient $llmClient): Agent
