@@ -41,6 +41,16 @@
         "title": "Create user transition"
       },
       {
+        "id": "syncUser",
+        "type": "idempotent",
+        "title": "Synchronize user transition"
+      },
+      {
+        "id": "deleteUser",
+        "type": "unsafe",
+        "title": "Delete user transition"
+      },
+      {
         "id": "userIdAlias",
         "type": "semantic",
         "href": "#userId"

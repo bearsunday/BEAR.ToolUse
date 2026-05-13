@@ -191,6 +191,7 @@ $response = $agent->run(
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
 use BEAR\ToolUse\Runtime\AlpsContextInputProcessor;
+use BEAR\ToolUse\Runtime\AlpsToolPolicyInputProcessor;
 use BEAR\ToolUse\Schema\AlpsSemanticDictionary;
 
 $alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
@@ -198,6 +199,18 @@ $alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
 $response = $agent->run(
     'このユーザーを探して',
     AgentOptions::withProcessors(inputProcessors: [
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
+ALPS の transition type を呼び出し単位の tool policy として使うこともできます。`safeOnly()` policy は、一致する ALPS descriptor が `safe` または `idempotent` の tool だけを公開します。一致する descriptor がない tool は、`safeOnlyAllowingUnknownTools()` を使わない限り隠されます。
+
+```php
+$response = $agent->run(
+    '現在のアカウント状態を変更せずに要約して',
+    AgentOptions::withProcessors(inputProcessors: [
+        AlpsToolPolicyInputProcessor::safeOnly($alps),
         new AlpsContextInputProcessor($alps),
     ]),
 );
@@ -689,6 +702,7 @@ Dispatcherが検出するエラー:
 | `AgentOptions` | ツール制限などの呼び出し単位オプション |
 | `LlmRequest` | Input Processor に渡される LLM request |
 | `AlpsContextInputProcessor` | 関連する ALPS descriptor を各 LLM request に追加 |
+| `AlpsToolPolicyInputProcessor` | ALPS transition type に一致する tool だけに絞り込み |
 | `AgentProfile` | Named Subagent の設定 |
 | `AgentPool` | Named Subagent の登録・作成 |
 | `AgentDelegator` | `ask_*` tool call を Subagent に委譲 |
