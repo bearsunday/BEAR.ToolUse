@@ -214,6 +214,30 @@ final class AgentProcessorTest extends TestCase
         $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
     }
 
+    public function testAgentOutputProcessorMustPreserveToolCallCount(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                return new LlmResponse('tool_use', $output->content, []);
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve tool_use tool calls.');
+
+        $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
     public function testInputProcessorFilteredToolIsEnforced(): void
     {
         $llmClient = new FakeLlmClient();
