@@ -294,6 +294,9 @@ final class StreamingAgentTest extends TestCase
         $lastEvent = end($events);
         self::assertSame(AgentEvent::COMPLETED, $lastEvent->type);
         self::assertSame('Partial', $lastEvent->data['fullText']);
+        self::assertCount(2, $this->agent->messages);
+        self::assertSame('assistant', $this->agent->messages[1]->role);
+        self::assertSame('Partial', $this->agent->messages[1]->content[0]['text']);
     }
 
     public function testToolDispatchException(): void

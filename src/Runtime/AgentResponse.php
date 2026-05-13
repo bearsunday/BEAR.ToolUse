@@ -27,9 +27,10 @@ final readonly class AgentResponse
     ) {
     }
 
-    public static function completed(mixed $content): self
+    /** @param list<Message> $messages */
+    public static function completed(mixed $content, array $messages = []): self
     {
-        return new self(true, self::STOP_COMPLETED, $content, []);
+        return new self(true, self::STOP_COMPLETED, $content, $messages);
     }
 
     /** @param list<Message> $messages */

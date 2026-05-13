@@ -61,7 +61,9 @@ final class Agent implements AgentInterface
 
             switch ($response->stopReason) {
                 case 'end_turn':
-                    return AgentResponse::completed($response->content);
+                    $this->recordAssistantResponse($response);
+
+                    return AgentResponse::completed($response->content, $this->messages);
 
                 case 'tool_use':
                     $this->messages[] = Message::assistant($response->content);
@@ -70,16 +72,20 @@ final class Agent implements AgentInterface
                     break;
 
                 case 'max_tokens':
-                    $this->messages[] = Message::assistant($response->content);
+                    $this->recordAssistantResponse($response);
 
                     return AgentResponse::maxTokensReached($response->content, $this->messages);
 
                 case 'stop_sequence':
+                    $this->recordAssistantResponse($response);
+
                     return AgentResponse::stopSequenceReached($response->content, $this->messages);
 
                 default:
                     // Unknown stop reason - treat as completed
-                    return AgentResponse::completed($response->content);
+                    $this->recordAssistantResponse($response);
+
+                    return AgentResponse::completed($response->content, $this->messages);
             }
         }
 
@@ -148,5 +154,14 @@ final class Agent implements AgentInterface
     {
         return $this->confirmationHandler !== null
             && $toolList->isConfirmable($toolCall->name);
+    }
+
+    private function recordAssistantResponse(LlmResponse $response): void
+    {
+        if ($response->content === []) {
+            return;
+        }
+
+        $this->messages[] = Message::assistant($response->content);
     }
 }
