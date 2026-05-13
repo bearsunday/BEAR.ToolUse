@@ -20,13 +20,14 @@ final class AlpsToolPolicyInputProcessorTest extends TestCase
         $this->dictionary = new AlpsSemanticDictionary(__DIR__ . '/../Fake/alps-profile.json');
     }
 
-    public function testSafeOnlyKeepsSafeAndIdempotentTools(): void
+    public function testSafeOnlyKeepsSafeTools(): void
     {
         $processor = AlpsToolPolicyInputProcessor::safeOnly($this->dictionary);
         $request = $this->request([
-            $this->tool('createUser'),
-            $this->tool('syncUser'),
-            $this->tool('deleteUser'),
+            $this->tool('goUserList'),
+            $this->tool('doSyncUser'),
+            $this->tool('doDeleteUser'),
+            $this->tool('doCreateUser'),
             $this->tool('unknownTool'),
         ]);
 
@@ -34,7 +35,25 @@ final class AlpsToolPolicyInputProcessorTest extends TestCase
 
         $this->assertNotSame($request, $processed);
         $this->assertSame(
-            ['createUser', 'syncUser'],
+            ['goUserList'],
+            $this->toolNames($processed),
+        );
+    }
+
+    public function testSafeAndIdempotentKeepsSafeAndIdempotentTools(): void
+    {
+        $processor = AlpsToolPolicyInputProcessor::safeAndIdempotent($this->dictionary);
+        $request = $this->request([
+            $this->tool('goUserList'),
+            $this->tool('doSyncUser'),
+            $this->tool('doDeleteUser'),
+            $this->tool('doCreateUser'),
+        ]);
+
+        $processed = $processor->process($request);
+
+        $this->assertSame(
+            ['goUserList', 'doSyncUser', 'doDeleteUser'],
             $this->toolNames($processed),
         );
     }
@@ -43,15 +62,35 @@ final class AlpsToolPolicyInputProcessorTest extends TestCase
     {
         $processor = AlpsToolPolicyInputProcessor::safeOnlyAllowingUnknownTools($this->dictionary);
         $request = $this->request([
-            $this->tool('createUser'),
-            $this->tool('deleteUser'),
+            $this->tool('goUserList'),
+            $this->tool('doDeleteUser'),
+            $this->tool('doCreateUser'),
             $this->tool('unknownTool'),
         ]);
 
         $processed = $processor->process($request);
 
         $this->assertSame(
-            ['createUser', 'unknownTool'],
+            ['goUserList', 'unknownTool'],
+            $this->toolNames($processed),
+        );
+    }
+
+    public function testSafeAndIdempotentCanAllowUnknownTools(): void
+    {
+        $processor = AlpsToolPolicyInputProcessor::safeAndIdempotentAllowingUnknownTools($this->dictionary);
+        $request = $this->request([
+            $this->tool('goUserList'),
+            $this->tool('doSyncUser'),
+            $this->tool('doDeleteUser'),
+            $this->tool('doCreateUser'),
+            $this->tool('unknownTool'),
+        ]);
+
+        $processed = $processor->process($request);
+
+        $this->assertSame(
+            ['goUserList', 'doSyncUser', 'doDeleteUser', 'unknownTool'],
             $this->toolNames($processed),
         );
     }
@@ -60,14 +99,15 @@ final class AlpsToolPolicyInputProcessorTest extends TestCase
     {
         $processor = new AlpsToolPolicyInputProcessor($this->dictionary, ['unsafe']);
         $request = $this->request([
-            $this->tool('createUser'),
-            $this->tool('deleteUser'),
+            $this->tool('goUserList'),
+            $this->tool('doDeleteUser'),
+            $this->tool('doCreateUser'),
         ]);
 
         $processed = $processor->process($request);
 
         $this->assertSame(
-            ['deleteUser'],
+            ['doCreateUser'],
             $this->toolNames($processed),
         );
     }
@@ -76,14 +116,14 @@ final class AlpsToolPolicyInputProcessorTest extends TestCase
     {
         $processor = AlpsToolPolicyInputProcessor::safeOnly($this->dictionary);
         $request = $this->request([
-            $this->tool('create_user'),
-            $this->tool('delete_user'),
+            $this->tool('go_user_list'),
+            $this->tool('do_delete_user'),
         ]);
 
         $processed = $processor->process($request);
 
         $this->assertSame(
-            ['create_user'],
+            ['go_user_list'],
             $this->toolNames($processed),
         );
     }
@@ -92,8 +132,7 @@ final class AlpsToolPolicyInputProcessorTest extends TestCase
     {
         $processor = AlpsToolPolicyInputProcessor::safeOnly($this->dictionary);
         $request = $this->request([
-            $this->tool('createUser'),
-            $this->tool('syncUser'),
+            $this->tool('goUserList'),
         ]);
 
         $processed = $processor->process($request);

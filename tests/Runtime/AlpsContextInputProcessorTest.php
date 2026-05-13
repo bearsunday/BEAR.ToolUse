@@ -106,7 +106,7 @@ final class AlpsContextInputProcessorTest extends TestCase
             'system',
             [Message::user('Create the user')],
             [
-                new Tool('createUser', 'Create user', [
+                new Tool('goUserList', 'Open user list', [
                     'type' => 'object',
                     'properties' => [],
                     'required' => [],
@@ -117,7 +117,7 @@ final class AlpsContextInputProcessorTest extends TestCase
         $processed = $processor->process($request);
 
         $this->assertSame(
-            "Application semantics from ALPS:\n- createUser [safe]: Create user transition",
+            "Application semantics from ALPS:\n- goUserList [safe]: Open user list transition",
             $processed->messages[1]->content[0]['text'],
         );
     }
@@ -129,7 +129,7 @@ final class AlpsContextInputProcessorTest extends TestCase
             'system',
             [Message::user('Create the user')],
             [
-                new Tool('create_user', 'Create user', [
+                new Tool('go_user_list', 'Open user list', [
                     'type' => 'object',
                     'properties' => [],
                     'required' => [],
@@ -140,7 +140,7 @@ final class AlpsContextInputProcessorTest extends TestCase
         $processed = $processor->process($request);
 
         $this->assertSame(
-            "Application semantics from ALPS:\n- create_user [safe]: Create user transition",
+            "Application semantics from ALPS:\n- go_user_list [safe]: Open user list transition",
             $processed->messages[1]->content[0]['text'],
         );
     }

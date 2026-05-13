@@ -204,7 +204,7 @@ $response = $agent->run(
 );
 ```
 
-ALPS の transition type を呼び出し単位の tool policy として使うこともできます。`safeOnly()` policy は、一致する ALPS descriptor が `safe` または `idempotent` の tool だけを公開します。一致する descriptor がない tool は、`safeOnlyAllowingUnknownTools()` を使わない限り隠されます。
+ALPS の transition type を呼び出し単位の tool policy として使うこともできます。`safeOnly()` policy は、一致する ALPS descriptor が `safe` の tool だけを公開します。一致する descriptor がない tool は、`safeOnlyAllowingUnknownTools()` を使わない限り隠されます。冪等だが状態変更を伴う transition も許可する場合は `safeAndIdempotent()` を使います。policy と context processor を組み合わせる場合は、policy を先に置くことで `AlpsContextInputProcessor` がフィルタ後に残った tool だけを説明できます。
 
 ```php
 $response = $agent->run(
@@ -251,6 +251,8 @@ Subagent は直接呼び出すこともできます。
 ```php
 $response = $delegator->ask('critic', 'この設計のリスクは？', ['articleId' => 1]);
 ```
+
+`AgentPool` が作成する Subagent は、pool に `ConfirmationHandlerInterface` が設定されていない場合、確認対象 tool をデフォルトで拒否します。Subagent に `#[Tool(confirm: true)]` の resource 実行を許可したい場合は、`AgentPool` に confirmation handler を渡してください。
 
 ### 8. 会話履歴
 
@@ -425,7 +427,7 @@ Y → ツール実行
 N → "User cancelled this operation." → LLM: 「承知しました。」
 ```
 
-`ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。
+直接作成した `Agent` では、`ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。一方、`AgentPool` が作成する Subagent はより保守的で、pool に confirmation handler がない場合、確認対象の Subagent tool call はデフォルトでキャンセルされます。
 
 ### ストリーミングエージェントでの確認
 
@@ -685,7 +687,9 @@ Dispatcherが検出するエラー:
 | `SchemaConverterInterface` | リソースからツール定義への変換 |
 | `ToolCollectorInterface` | ツールの収集と登録 |
 | `AgentInterface` | エージェントランタイム |
+| `OptionAwareAgentInterface` | 呼び出し単位の `AgentOptions` に対応したエージェントランタイム |
 | `StreamingAgentInterface` | ストリーミングエージェントランタイム |
+| `OptionAwareStreamingAgentInterface` | 呼び出し単位の `AgentOptions` に対応したストリーミングエージェントランタイム |
 | `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
 | `InputProcessorInterface` | LLM 呼び出し前に request を処理 |
 | `OutputProcessorInterface` | LLM 呼び出し後に response または stream event を処理 |

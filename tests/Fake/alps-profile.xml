@@ -11,9 +11,12 @@
       <doc>Nested description</doc>
     </descriptor>
   </descriptor>
-  <descriptor id="createUser" type="safe" title="Create user transition"/>
-  <descriptor id="syncUser" type="idempotent" title="Synchronize user transition"/>
-  <descriptor id="deleteUser" type="unsafe" title="Delete user transition"/>
+  <descriptor id="UserList" type="semantic" title="User list state"/>
+  <descriptor id="User" type="semantic" title="User detail state"/>
+  <descriptor id="goUserList" type="safe" title="Open user list transition" rt="#UserList"/>
+  <descriptor id="doSyncUser" type="idempotent" title="Synchronize user transition" rt="#User"/>
+  <descriptor id="doDeleteUser" type="idempotent" title="Delete user transition" rt="#UserList"/>
+  <descriptor id="doCreateUser" type="unsafe" title="Create user transition" rt="#User"/>
   <descriptor id="userIdAlias" type="semantic" href="#userId"/>
   <descriptor id="danglingHref" type="semantic" href="#nonExistent"/>
   <descriptor id="chainA" type="semantic" href="#chainB"/>

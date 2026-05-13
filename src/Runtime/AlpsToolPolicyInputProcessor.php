@@ -32,10 +32,20 @@ final readonly class AlpsToolPolicyInputProcessor implements InputProcessorInter
 
     public static function safeOnly(AlpsSemanticDictionary $dictionary): self
     {
-        return new self($dictionary, ['safe', 'idempotent']);
+        return new self($dictionary, ['safe']);
     }
 
     public static function safeOnlyAllowingUnknownTools(AlpsSemanticDictionary $dictionary): self
+    {
+        return new self($dictionary, ['safe'], self::UNKNOWN_TOOLS_ALLOWED);
+    }
+
+    public static function safeAndIdempotent(AlpsSemanticDictionary $dictionary): self
+    {
+        return new self($dictionary, ['safe', 'idempotent']);
+    }
+
+    public static function safeAndIdempotentAllowingUnknownTools(AlpsSemanticDictionary $dictionary): self
     {
         return new self($dictionary, ['safe', 'idempotent'], self::UNKNOWN_TOOLS_ALLOWED);
     }

@@ -20,7 +20,7 @@ use function assert;
  * This agent maintains conversation state across multiple run() calls.
  * Call reset() to clear the conversation history and start fresh.
  */
-final class Agent implements AgentInterface
+final class Agent implements OptionAwareAgentInterface
 {
     /** @var list<Message> */
     public array $messages = [];
@@ -45,7 +45,6 @@ final class Agent implements AgentInterface
     public function run(string $userMessage, AgentOptions|null $options = null): AgentResponse
     {
         $runTools = $this->resolveTools($options);
-        $enforceToolList = $options?->enforcesToolList() ?? false;
 
         $this->messages[] = Message::user($userMessage);
 
@@ -67,7 +66,7 @@ final class Agent implements AgentInterface
 
                 case 'tool_use':
                     $this->messages[] = Message::assistant($response->content);
-                    $toolResults      = $this->processToolCalls($response, $requestToolList, $enforceToolList);
+                    $toolResults      = $this->processToolCalls($response, $requestToolList);
                     $this->messages[] = Message::toolResults($toolResults);
                     break;
 
@@ -116,11 +115,11 @@ final class Agent implements AgentInterface
     }
 
     /** @return list<ToolResult> */
-    private function processToolCalls(LlmResponse $response, ToolList $toolList, bool $enforceToolList): array
+    private function processToolCalls(LlmResponse $response, ToolList $toolList): array
     {
         $toolResults = [];
         foreach ($response->toolCalls as $toolCall) {
-            if ($enforceToolList && ! $toolList->has($toolCall->name)) {
+            if (! $toolList->has($toolCall->name)) {
                 $toolResults[] = ToolResult::error($toolCall->id, 'Tool is not enabled: ' . $toolCall->name);
 
                 continue;

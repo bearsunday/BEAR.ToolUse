@@ -52,19 +52,21 @@ final class AgentPool
         return $this->profiles[$name];
     }
 
-    public function create(string $name): AgentInterface
+    public function create(string $name): OptionAwareAgentInterface
     {
         $profile = $this->get($name);
         $tools = $this->collector->collect($profile->resources);
 
-        return new Agent(
+        $agent = new Agent(
             client: $this->client,
             dispatcher: $this->dispatcher,
             tools: $tools,
             systemPrompt: $profile->systemPrompt,
             maxIterations: $profile->maxIterations,
-            confirmationHandler: $this->confirmationHandler,
+            confirmationHandler: $this->confirmationHandler ?? new DenyConfirmationHandler(),
         );
+
+        return new ProfiledAgent($agent, $profile->options);
     }
 
     /** @return list<Tool> */

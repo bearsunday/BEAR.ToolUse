@@ -100,6 +100,67 @@ final class AgentProcessorTest extends TestCase
         $this->assertSame('memory', $llmClient->calls[1]['messages'][3]->content[0]['text']);
     }
 
+    public function testAgentOutputProcessorMustPreserveToolUseContentBlocks(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                return new LlmResponse(
+                    $output->stopReason,
+                    [['type' => 'text', 'text' => 'corrupted']],
+                    $output->toolCalls,
+                );
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve tool_use content blocks for tool calls.');
+
+        $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testAgentOutputProcessorMustPreserveToolUseNameAndInput(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                $content = [];
+                foreach ($output->content as $block) {
+                    if (($block['type'] ?? null) === 'tool_use') {
+                        $block['name'] = 'other_get';
+                    }
+
+                    $content[] = $block;
+                }
+
+                return new LlmResponse($output->stopReason, $content, $output->toolCalls);
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve tool_use content blocks for tool calls.');
+
+        $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
     public function testInputProcessorFilteredToolIsEnforced(): void
     {
         $llmClient = new FakeLlmClient();
@@ -112,6 +173,22 @@ final class AgentProcessorTest extends TestCase
             inputProcessors: [new FakeToolFilteringInputProcessor('article_get')],
         ));
 
+        $toolResultMessage = $llmClient->calls[1]['messages'][2];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testAgentRejectsUnadvertisedRegisteredToolWithoutOptions(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgentWithArticleToolAndErrorRegistry($llmClient);
+
+        $llmClient->queueToolUseResponse('call_1', 'error_get', []);
+        $llmClient->queueTextResponse('Recovered.');
+
+        $response = $agent->run('Try hidden error tool');
+
+        $this->assertTrue($response->completed);
         $toolResultMessage = $llmClient->calls[1]['messages'][2];
         $this->assertTrue($toolResultMessage->content[0]['is_error']);
         $this->assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
@@ -146,6 +223,31 @@ final class AgentProcessorTest extends TestCase
         $this->assertSame('Processed', $events[1]->data['fullText']);
     }
 
+    public function testStreamingAgentRejectsUnadvertisedRegisteredToolWithoutOptions(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        $agent = $this->createStreamingAgentWithArticleToolAndErrorRegistry($llmClient);
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'error_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Recovered.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($agent->runStream('Try hidden error tool'));
+
+        $toolResultMessage = $llmClient->calls[1]['messages'][2];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
+    }
+
     public function testStreamingOutputProcessorMustReturnStreamEvent(): void
     {
         $llmClient = new FakeStreamingLlmClient();
@@ -170,6 +272,68 @@ final class AgentProcessorTest extends TestCase
         $this->expectExceptionMessage('Output processor must return StreamEvent for streaming calls.');
 
         iterator_to_array($agent->runStream('Hi', AgentOptions::withProcessors(outputProcessors: [$processor])));
+    }
+
+    public function testStreamingOutputProcessorMustPreserveStreamEventType(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        $agent = $this->createStreamingAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if ($output instanceof StreamEvent && $output->type === StreamEvent::TOOL_USE_START) {
+                    return new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'corrupted']);
+                }
+
+                return $output;
+            }
+        };
+
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"id":1}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve stream event type.');
+
+        iterator_to_array($agent->runStream('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor])));
+    }
+
+    public function testStreamingOutputProcessorMustPreserveToolUseControlData(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        $agent = $this->createStreamingAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if ($output instanceof StreamEvent && $output->type === StreamEvent::TOOL_USE_DELTA) {
+                    return new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"id":2}']);
+                }
+
+                return $output;
+            }
+        };
+
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"id":1}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve stream tool-use control data.');
+
+        iterator_to_array($agent->runStream('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor])));
     }
 
     private function createAgent(FakeLlmClient $llmClient): Agent
@@ -200,6 +364,21 @@ final class AgentProcessorTest extends TestCase
         );
     }
 
+    private function createStreamingAgentWithArticleToolAndErrorRegistry(FakeStreamingLlmClient $llmClient): StreamingAgent
+    {
+        [$resource, $registry] = $this->resourceAndRegistry();
+        $registry->register('article_get', 'app://self/article', 'get');
+        $registry->register('error_get', 'app://self/error', 'get');
+
+        return new StreamingAgent(
+            client: $llmClient,
+            dispatcher: new Dispatcher($resource, $registry, new NullToolCallObserver()),
+            tools: [$this->articleTool()],
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+    }
+
     private function createAgentWithArticleAndErrorTools(FakeLlmClient $llmClient): Agent
     {
         [$resource, $registry] = $this->resourceAndRegistry();
@@ -217,6 +396,21 @@ final class AgentProcessorTest extends TestCase
                     'required' => [],
                 ]),
             ],
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+    }
+
+    private function createAgentWithArticleToolAndErrorRegistry(FakeLlmClient $llmClient): Agent
+    {
+        [$resource, $registry] = $this->resourceAndRegistry();
+        $registry->register('article_get', 'app://self/article', 'get');
+        $registry->register('error_get', 'app://self/error', 'get');
+
+        return new Agent(
+            client: $llmClient,
+            dispatcher: new Dispatcher($resource, $registry, new NullToolCallObserver()),
+            tools: [$this->articleTool()],
             systemPrompt: 'You are a helpful assistant.',
             maxIterations: 5,
         );
