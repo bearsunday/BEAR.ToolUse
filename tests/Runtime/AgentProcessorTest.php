@@ -8,6 +8,7 @@ use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeInputProcessor;
 use BEAR\ToolUse\Fake\FakeLlmClient;
@@ -157,6 +158,58 @@ final class AgentProcessorTest extends TestCase
 
         $this->expectException(UnexpectedValueException::class);
         $this->expectExceptionMessage('Output processor must preserve tool_use content blocks for tool calls.');
+
+        $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testAgentOutputProcessorMustPreserveToolUseStopReason(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                return new LlmResponse('end_turn', $output->content, $output->toolCalls);
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve tool_use stop reason.');
+
+        $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testAgentOutputProcessorMustPreserveOriginalToolCalls(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                return new LlmResponse(
+                    'tool_use',
+                    [['type' => 'tool_use', 'id' => 'call_2', 'name' => 'other_get', 'input' => ['id' => 2]]],
+                    [new ToolCall('call_2', 'other_get', ['id' => 2])],
+                );
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve tool_use tool calls.');
 
         $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
     }

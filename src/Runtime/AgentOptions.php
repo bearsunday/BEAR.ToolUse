@@ -13,6 +13,7 @@ use InvalidArgumentException;
 use UnexpectedValueException;
 
 use function array_fill_keys;
+use function count;
 use function implode;
 use function sprintf;
 
@@ -129,7 +130,7 @@ final readonly class AgentOptions
             }
         }
 
-        $this->assertToolUseContentIsPreserved($output);
+        $this->assertToolUseContentIsPreserved($response, $output);
 
         return $output;
     }
@@ -149,20 +150,47 @@ final readonly class AgentOptions
         return $output;
     }
 
-    private function assertToolUseContentIsPreserved(LlmResponse $response): void
+    private function assertToolUseContentIsPreserved(LlmResponse $input, LlmResponse $output): void
     {
-        if ($response->stopReason !== 'tool_use' || $response->toolCalls === []) {
+        if ($input->stopReason !== 'tool_use' || $input->toolCalls === []) {
             return;
         }
 
-        $toolUseBlocks = $this->toolUseBlocksById($response);
+        if ($output->stopReason !== $input->stopReason) {
+            throw new UnexpectedValueException('Output processor must preserve tool_use stop reason.');
+        }
 
-        foreach ($response->toolCalls as $toolCall) {
+        $this->assertToolCallsArePreserved($input, $output);
+
+        $toolUseBlocks = $this->toolUseBlocksById($output);
+
+        foreach ($input->toolCalls as $toolCall) {
             if ($this->toolUseBlockMatchesToolCall($toolUseBlocks[$toolCall->id] ?? null, $toolCall)) {
                 continue;
             }
 
             throw new UnexpectedValueException('Output processor must preserve tool_use content blocks for tool calls.');
+        }
+    }
+
+    private function assertToolCallsArePreserved(LlmResponse $input, LlmResponse $output): void
+    {
+        if (count($output->toolCalls) !== count($input->toolCalls)) {
+            throw new UnexpectedValueException('Output processor must preserve tool_use tool calls.');
+        }
+
+        foreach ($input->toolCalls as $index => $toolCall) {
+            $outputToolCall = $output->toolCalls[$index] ?? null;
+            if (
+                $outputToolCall instanceof ToolCall
+                && $outputToolCall->id === $toolCall->id
+                && $outputToolCall->name === $toolCall->name
+                && $outputToolCall->input === $toolCall->input
+            ) {
+                continue;
+            }
+
+            throw new UnexpectedValueException('Output processor must preserve tool_use tool calls.');
         }
     }
 
