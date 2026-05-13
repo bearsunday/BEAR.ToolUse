@@ -15,8 +15,11 @@ use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Schema\SchemaConverter;
+use BEAR\ToolUse\Schema\Tool;
 use BEAR\ToolUse\Schema\ToolCollector;
+use BEAR\ToolUse\Schema\ToolCollectorInterface;
 use InvalidArgumentException;
+use Override;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -82,6 +85,7 @@ final class AgentPoolTest extends TestCase
         $this->assertSame('ask_critic', $tool->name);
         $this->assertSame('Review design risks', $tool->description);
         $this->assertSame(['message'], $tool->inputSchema['required']);
+        $this->assertTrue($tool->inputSchema['properties']['context']['additionalProperties']);
     }
 
     public function testDelegatorAskUsesProfileResources(): void
@@ -150,7 +154,7 @@ final class AgentPoolTest extends TestCase
 
         $this->assertFalse($result->isError);
         $this->assertSame('Risk found.', $result->content);
-        $this->assertSame("Review this.\n\nContext:\n{\"id\":1}", $llmClient->calls[0]['messages'][0]->content[0]['text']);
+        $this->assertSame("Review this.\n\n<context>\n{\"id\":1}\n</context>", $llmClient->calls[0]['messages'][0]->content[0]['text']);
     }
 
     public function testDelegatorCanDispatchKnownSubagentToolOnly(): void
@@ -322,6 +326,52 @@ final class AgentPoolTest extends TestCase
         $toolResultMessage = $llmClient->calls[1]['messages'][2];
         $this->assertTrue($toolResultMessage->content[0]['is_error']);
         $this->assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testPoolCachesCollectedToolsPerProfile(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $dispatcher = new class implements DispatcherInterface {
+            #[Override]
+            public function dispatch(ToolCall $toolCall): ToolResult
+            {
+                return ToolResult::success($toolCall->id, 'unused');
+            }
+        };
+        $collector = new class implements ToolCollectorInterface {
+            public int $calls = 0;
+
+            /**
+             * @param list<string> $uris
+             *
+             * @return list<Tool>
+             */
+            #[Override]
+            public function collect(array $uris): array
+            {
+                $this->calls++;
+
+                return [
+                    new Tool('cached_get', 'Cached tool', [
+                        'type' => 'object',
+                        'properties' => [],
+                        'required' => [],
+                    ]),
+                ];
+            }
+        };
+        $pool = new AgentPool($llmClient, $dispatcher, $collector);
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+            resources: ['app://self/cached'],
+        ));
+
+        $pool->create('critic');
+        $pool->create('critic');
+
+        $this->assertSame(1, $collector->calls);
     }
 
     public function testProfiledAgentResetDelegatesToInnerAgent(): void

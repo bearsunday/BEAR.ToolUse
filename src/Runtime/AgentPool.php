@@ -20,6 +20,9 @@ final class AgentPool
     /** @var array<string, AgentProfile> */
     private array $profiles = [];
 
+    /** @var array<string, list<Tool>> */
+    private array $toolsByProfile = [];
+
     public function __construct(
         private readonly LlmClientInterface $client,
         private readonly DispatcherInterface $dispatcher,
@@ -31,6 +34,7 @@ final class AgentPool
     public function register(AgentProfile $profile): self
     {
         $this->profiles[$profile->name] = $profile;
+        unset($this->toolsByProfile[$profile->name]);
 
         return $this;
     }
@@ -55,7 +59,7 @@ final class AgentPool
     public function create(string $name): OptionAwareAgentInterface
     {
         $profile = $this->get($name);
-        $tools = $this->collector->collect($profile->resources);
+        $tools = $this->toolsByProfile[$name] ??= $this->collector->collect($profile->resources);
 
         $agent = new Agent(
             client: $this->client,

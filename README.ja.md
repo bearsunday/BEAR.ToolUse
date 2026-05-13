@@ -184,9 +184,9 @@ $response = $agent->run(
 );
 ```
 
-`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。
+`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。受け取ったものと同じ具体型を返す必要があります。text content は書き換えられますが、runtime が tool call を安全に dispatch できるように tool-use の制御データは保持してください。
 
-`AlpsContextInputProcessor` を使うと、ALPS を runtime context として注入できます。現在の LLM 呼び出しで利用可能な tool に一致する `safe` / `unsafe` などの transition descriptor と、tool input に一致する semantic descriptor を追加します。
+`AlpsContextInputProcessor` を使うと、ALPS を runtime context として注入できます。現在の LLM 呼び出しで利用可能な tool に一致する `safe` / `unsafe` などの transition descriptor と、tool input に一致する semantic descriptor を追加します。tool descriptor は tool 名（または camelCase 形）で照合されるため、`article_get` tool には `article_get` または `articleGet` のような ALPS descriptor id が必要です。tool input parameter は semantic descriptor のみを参照します。
 
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
@@ -204,7 +204,7 @@ $response = $agent->run(
 );
 ```
 
-ALPS の transition type を呼び出し単位の tool policy として使うこともできます。`safeOnly()` policy は、一致する ALPS descriptor が `safe` の tool だけを公開します。一致する descriptor がない tool は、`safeOnlyAllowingUnknownTools()` を使わない限り隠されます。冪等だが状態変更を伴う transition も許可する場合は `safeAndIdempotent()` を使います。policy と context processor を組み合わせる場合は、policy を先に置くことで `AlpsContextInputProcessor` がフィルタ後に残った tool だけを説明できます。
+ALPS の transition type を呼び出し単位の tool policy として使うこともできます。`safeOnly()` policy は、一致する ALPS descriptor が `safe` の tool だけを公開します。一致する descriptor がない tool は、`safeOnlyAllowingUnknownTools()` を使わない限り隠されます。冪等だが状態変更を伴う transition も許可する場合は `safeAndIdempotent()` を使います。この policy は、期待する tool が ALPS profile で網羅されている状態で使うか、移行中は unknown 許可 variant を選んでください。policy と context processor を組み合わせる場合は、policy を先に置くことで `AlpsContextInputProcessor` がフィルタ後に残った tool だけを説明できます。
 
 ```php
 $response = $agent->run(
@@ -275,6 +275,8 @@ $response = $agent->run('このユーザーについてもっと教えて');
 // 履歴をクリアして新しい会話を開始
 $agent->reset();
 ```
+
+`AgentResponse::$messages` は、`Agent::run()` から返された場合は停止時点の会話履歴スナップショットです。`AgentResponse::completed($content)` などの factory を直接呼ぶ場合は、明示的に渡さない限り履歴は空です。
 
 ### 9. ストリーミングエージェント
 

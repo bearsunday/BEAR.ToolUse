@@ -13,7 +13,13 @@ use function lcfirst;
 use function str_replace;
 use function ucwords;
 
-/** Filters available tools by matching ALPS descriptor types */
+/**
+ * Filters available tools by matching ALPS descriptor types.
+ *
+ * Tool names must match ALPS descriptor ids (or their camelCase form). Tools
+ * without a matching descriptor are hidden unless an allowing-unknown factory is
+ * used.
+ */
 final readonly class AlpsToolPolicyInputProcessor implements InputProcessorInterface
 {
     public const UNKNOWN_TOOLS_HIDDEN = 'hidden';

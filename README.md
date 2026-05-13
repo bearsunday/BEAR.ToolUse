@@ -184,9 +184,9 @@ $response = $agent->run(
 );
 ```
 
-`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents.
+`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents. It must return the same concrete type it receives. Text content may be rewritten, but tool-use control data must be preserved so the runtime can dispatch tool calls safely.
 
-You can use ALPS as runtime context with `AlpsContextInputProcessor`. It injects matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs.
+You can use ALPS as runtime context with `AlpsContextInputProcessor`. It injects matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs. Tool descriptors match by tool name (or its camelCase form), so an `article_get` tool needs an ALPS descriptor id such as `article_get` or `articleGet`. Tool input parameters use semantic descriptors only.
 
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
@@ -204,7 +204,7 @@ $response = $agent->run(
 );
 ```
 
-You can also use ALPS transition types as a per-call tool policy. The `safeOnly()` policy exposes only tools whose matching ALPS descriptor is `safe`; tools without a matching descriptor are hidden unless you use `safeOnlyAllowingUnknownTools()`. Use `safeAndIdempotent()` when idempotent state-changing transitions are also allowed. When combining policy and context processors, place the policy first so `AlpsContextInputProcessor` describes only the tools still available after filtering.
+You can also use ALPS transition types as a per-call tool policy. The `safeOnly()` policy exposes only tools whose matching ALPS descriptor is `safe`; tools without a matching descriptor are hidden unless you use `safeOnlyAllowingUnknownTools()`. Use `safeAndIdempotent()` when idempotent state-changing transitions are also allowed. Apply this policy after the ALPS profile covers the tools you expect, or use the allowing-unknown variant during migration. When combining policy and context processors, place the policy first so `AlpsContextInputProcessor` describes only the tools still available after filtering.
 
 ```php
 $response = $agent->run(
@@ -275,6 +275,8 @@ $response = $agent->run('Tell me more about this user');
 // Clear history to start fresh
 $agent->reset();
 ```
+
+`AgentResponse::$messages` contains the conversation history snapshot when the response came from `Agent::run()`. If you call a factory such as `AgentResponse::completed($content)` directly, the history is empty unless you pass it explicitly.
 
 ### 9. Streaming Agent
 

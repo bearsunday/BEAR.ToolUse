@@ -128,6 +128,6 @@ final readonly class AgentDelegator implements DispatcherInterface
 
         $encodedContext = json_encode($context, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        return $message . "\n\nContext:\n" . $encodedContext;
+        return $message . "\n\n<context>\n" . $encodedContext . "\n</context>";
     }
 }

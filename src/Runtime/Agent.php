@@ -65,7 +65,7 @@ final class Agent implements OptionAwareAgentInterface
                     return AgentResponse::completed($response->content, $this->messages);
 
                 case 'tool_use':
-                    $this->messages[] = Message::assistant($response->content);
+                    $this->recordAssistantResponse($response);
                     $toolResults      = $this->processToolCalls($response, $requestToolList);
                     $this->messages[] = Message::toolResults($toolResults);
                     break;

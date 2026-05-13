@@ -9,7 +9,11 @@ use function is_array;
 use function is_string;
 
 /**
- * Response from agent execution
+ * Response from agent execution.
+ *
+ * When returned by Agent::run(), `messages` is a snapshot of the conversation
+ * history at the stop point. Direct factory calls keep their default history
+ * value unless messages are passed explicitly.
  */
 final readonly class AgentResponse
 {
@@ -27,25 +31,25 @@ final readonly class AgentResponse
     ) {
     }
 
-    /** @param list<Message> $messages */
+    /** @param list<Message> $messages Conversation history to attach to the completed response. */
     public static function completed(mixed $content, array $messages = []): self
     {
         return new self(true, self::STOP_COMPLETED, $content, $messages);
     }
 
-    /** @param list<Message> $messages */
+    /** @param list<Message> $messages Conversation history at the iteration limit. */
     public static function maxIterationsReached(array $messages): self
     {
         return new self(false, self::STOP_MAX_ITERATIONS, null, $messages);
     }
 
-    /** @param list<Message> $messages */
+    /** @param list<Message> $messages Conversation history at the token limit. */
     public static function maxTokensReached(mixed $content, array $messages): self
     {
         return new self(false, self::STOP_MAX_TOKENS, $content, $messages);
     }
 
-    /** @param list<Message> $messages */
+    /** @param list<Message> $messages Conversation history at the stop sequence. */
     public static function stopSequenceReached(mixed $content, array $messages): self
     {
         return new self(false, self::STOP_STOP_SEQUENCE, $content, $messages);

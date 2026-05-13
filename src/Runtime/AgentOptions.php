@@ -51,7 +51,11 @@ final readonly class AgentOptions
         array $outputProcessors = [],
         array|null $enabledTools = null,
     ): self {
-        return new self($enabledTools, $inputProcessors, $outputProcessors);
+        return new self(
+            enabledTools: $enabledTools,
+            inputProcessors: $inputProcessors,
+            outputProcessors: $outputProcessors,
+        );
     }
 
     public function filtersTools(): bool

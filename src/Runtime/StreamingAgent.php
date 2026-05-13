@@ -106,7 +106,7 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
                 continue;
             }
 
-            // Other stop reasons (max_tokens, stop_sequence) - complete
+            // Any terminal stop reason without pending tools is returned as a completed stream.
             $this->recordContentBlocks($state);
 
             yield AgentEvent::completed($fullText);
