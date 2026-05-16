@@ -24,7 +24,6 @@ final class Agent implements AgentInterface
 {
     /** @var list<Message> */
     public array $messages = [];
-    private readonly ToolList $toolList;
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -35,7 +34,6 @@ final class Agent implements AgentInterface
         private readonly int $maxIterations = 10,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
-        $this->toolList = new ToolList($this->tools);
     }
 
     /**
@@ -44,16 +42,22 @@ final class Agent implements AgentInterface
      * Note: Messages accumulate across calls. Use reset() to clear history.
      */
     #[Override]
-    public function run(string $userMessage): AgentResponse
+    public function run(string $userMessage, AgentOptions|null $options = null): AgentResponse
     {
+        $runTools = $this->resolveTools($options);
+        $enforceToolList = $options?->enforcesToolList() ?? false;
+
         $this->messages[] = Message::user($userMessage);
 
         for ($i = 0; $i < $this->maxIterations; $i++) {
+            $request = $this->createRequest($runTools, $options);
             $response = $this->client->chat(
-                system: $this->systemPrompt,
-                messages: $this->messages,
-                tools: $this->tools,
+                system: $request->systemPrompt,
+                messages: $request->messages,
+                tools: $request->tools,
             );
+            $response = $options?->processResponse($response, $request) ?? $response;
+            $requestToolList = new ToolList($request->tools);
 
             switch ($response->stopReason) {
                 case 'end_turn':
@@ -61,7 +65,7 @@ final class Agent implements AgentInterface
 
                 case 'tool_use':
                     $this->messages[] = Message::assistant($response->content);
-                    $toolResults      = $this->processToolCalls($response);
+                    $toolResults      = $this->processToolCalls($response, $requestToolList, $enforceToolList);
                     $this->messages[] = Message::toolResults($toolResults);
                     break;
 
@@ -82,6 +86,20 @@ final class Agent implements AgentInterface
         return AgentResponse::maxIterationsReached($this->messages);
     }
 
+    /** @return list<Tool> */
+    private function resolveTools(AgentOptions|null $options): array
+    {
+        return $options?->filterTools($this->tools) ?? $this->tools;
+    }
+
+    /** @param list<Tool> $tools */
+    private function createRequest(array $tools, AgentOptions|null $options): LlmRequest
+    {
+        $request = new LlmRequest($this->systemPrompt, $this->messages, $tools);
+
+        return $options?->processRequest($request) ?? $request;
+    }
+
     /**
      * Clear conversation history to start a new conversation
      */
@@ -92,11 +110,17 @@ final class Agent implements AgentInterface
     }
 
     /** @return list<ToolResult> */
-    private function processToolCalls(LlmResponse $response): array
+    private function processToolCalls(LlmResponse $response, ToolList $toolList, bool $enforceToolList): array
     {
         $toolResults = [];
         foreach ($response->toolCalls as $toolCall) {
-            if ($this->isCancelled($toolCall, $response->getText())) {
+            if ($enforceToolList && ! $toolList->has($toolCall->name)) {
+                $toolResults[] = ToolResult::error($toolCall->id, 'Tool is not enabled: ' . $toolCall->name);
+
+                continue;
+            }
+
+            if ($this->isCancelled($toolCall, $response->getText(), $toolList)) {
                 $toolResults[] = ToolResult::cancelled($toolCall->id);
 
                 continue;
@@ -108,9 +132,9 @@ final class Agent implements AgentInterface
         return $toolResults;
     }
 
-    private function isCancelled(ToolCall $toolCall, string $llmText): bool
+    private function isCancelled(ToolCall $toolCall, string $llmText, ToolList $toolList): bool
     {
-        if (! $this->requiresConfirmation($toolCall)) {
+        if (! $this->requiresConfirmation($toolCall, $toolList)) {
             return false;
         }
 
@@ -120,9 +144,9 @@ final class Agent implements AgentInterface
         return ! $confirmationHandler->confirm($toolCall, $llmText);
     }
 
-    private function requiresConfirmation(ToolCall $toolCall): bool
+    private function requiresConfirmation(ToolCall $toolCall, ToolList $toolList): bool
     {
         return $this->confirmationHandler !== null
-            && $this->toolList->isConfirmable($toolCall->name);
+            && $toolList->isConfirmable($toolCall->name);
     }
 }

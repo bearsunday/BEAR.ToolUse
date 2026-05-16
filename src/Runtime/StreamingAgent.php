@@ -31,7 +31,6 @@ final class StreamingAgent implements StreamingAgentInterface
 {
     /** @var list<Message> */
     public array $messages = [];
-    private readonly ToolList $toolList;
 
     /** @param list<Tool> $tools */
     public function __construct(
@@ -41,23 +40,28 @@ final class StreamingAgent implements StreamingAgentInterface
         private readonly string $systemPrompt,
         private readonly int $maxIterations = 10,
     ) {
-        $this->toolList = new ToolList($this->tools);
     }
 
     /** @return Generator<int, AgentEvent, mixed, void> */
     #[Override]
-    public function runStream(string $userMessage): Generator
+    public function runStream(string $userMessage, AgentOptions|null $options = null): Generator
     {
+        $runTools = $this->resolveTools($options);
+        $enforceToolList = $options?->enforcesToolList() ?? false;
+
         $this->messages[] = Message::user($userMessage);
         $fullText = '';
         $hadPreviousText = false;
 
         for ($i = 0; $i < $this->maxIterations; $i++) {
+            $request = $this->createRequest($runTools, $options);
             $stream = $this->client->chatStream(
-                system: $this->systemPrompt,
-                messages: $this->messages,
-                tools: $this->tools,
+                system: $request->systemPrompt,
+                messages: $request->messages,
+                tools: $request->tools,
             );
+            $stream = $this->processStream($stream, $request, $options);
+            $requestToolList = new ToolList($request->tools);
 
             $consumeGen = $this->consumeStream($stream, $hadPreviousText, $fullText);
             foreach ($consumeGen as $event) {
@@ -78,7 +82,12 @@ final class StreamingAgent implements StreamingAgentInterface
             if ($state->stopReason === 'tool_use' && $state->pendingToolCalls !== []) {
                 $this->messages[] = Message::assistant($state->contentBlocks);
 
-                $dispatchGen = $this->dispatchPendingToolCalls($state->pendingToolCalls, $state->currentText);
+                $dispatchGen = $this->dispatchPendingToolCalls(
+                    $state->pendingToolCalls,
+                    $state->currentText,
+                    $requestToolList,
+                    $enforceToolList,
+                );
                 while ($dispatchGen->valid()) {
                     /** @var AgentEvent $currentEvent */
                     $currentEvent = $dispatchGen->current();
@@ -123,6 +132,32 @@ final class StreamingAgent implements StreamingAgentInterface
         $this->messages[] = Message::assistant($state->contentBlocks);
     }
 
+    /** @return list<Tool> */
+    private function resolveTools(AgentOptions|null $options): array
+    {
+        return $options?->filterTools($this->tools) ?? $this->tools;
+    }
+
+    /** @param list<Tool> $tools */
+    private function createRequest(array $tools, AgentOptions|null $options): LlmRequest
+    {
+        $request = new LlmRequest($this->systemPrompt, $this->messages, $tools);
+
+        return $options?->processRequest($request) ?? $request;
+    }
+
+    /**
+     * @param Generator<int, StreamEvent, mixed, void> $stream
+     *
+     * @return Generator<int, StreamEvent, mixed, void>
+     */
+    private function processStream(Generator $stream, LlmRequest $request, AgentOptions|null $options): Generator
+    {
+        foreach ($stream as $event) {
+            yield $options?->processStreamEvent($event, $request) ?? $event;
+        }
+    }
+
     /**
      * Consume stream events and yield AgentEvents
      *
@@ -151,8 +186,12 @@ final class StreamingAgent implements StreamingAgentInterface
      *
      * @return Generator<int, AgentEvent, bool, list<ToolResult>>
      */
-    private function dispatchPendingToolCalls(array $pendingToolCalls, string $currentText): Generator
-    {
+    private function dispatchPendingToolCalls(
+        array $pendingToolCalls,
+        string $currentText,
+        ToolList $toolList,
+        bool $enforceToolList,
+    ): Generator {
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
             /** @var array<string, mixed> $input */
@@ -163,7 +202,15 @@ final class StreamingAgent implements StreamingAgentInterface
                 input: $input,
             );
 
-            if ($this->toolList->isConfirmable($toolCall->name)) {
+            if ($enforceToolList && ! $toolList->has($toolCall->name)) {
+                $toolResults[] = ToolResult::error($toolCall->id, 'Tool is not enabled: ' . $toolCall->name);
+
+                yield AgentEvent::toolResult($pending->name);
+
+                continue;
+            }
+
+            if ($toolList->isConfirmable($toolCall->name)) {
                 /** @var bool $approved */
                 $approved = yield AgentEvent::confirmationRequired(
                     $toolCall->name,

@@ -13,6 +13,7 @@ use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Fake\FakeThrowingDispatcher;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
@@ -23,6 +24,7 @@ use function iterator_to_array;
 use function json_encode;
 
 #[CoversClass(StreamingAgent::class)]
+#[CoversClass(AgentOptions::class)]
 #[CoversClass(StreamContentAccumulator::class)]
 #[CoversClass(StreamIterationState::class)]
 #[CoversClass(AgentEvent::class)]
@@ -122,6 +124,94 @@ final class StreamingAgentTest extends TestCase
         self::assertSame('article_get', $events[1]->data['toolName']);
         self::assertSame('article_get', $events[2]->data['toolName']);
         self::assertSame("Looking up...\nFound it!", $events[5]->data['fullText']);
+    }
+
+    public function testRunStreamWithToolFilteringPassesOnlyEnabledTools(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        $agent = $this->createStreamingAgentWithArticleAndErrorTools($llmClient);
+
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($agent->runStream('Use limited tools', AgentOptions::withTools(['article_get'])));
+
+        self::assertSame(['article_get'], array_map(
+            static fn (Tool $tool): string => $tool->name,
+            $llmClient->calls[0]['tools'],
+        ));
+    }
+
+    public function testRunStreamWithToolFilteringPassesOnlyEnabledToolsAfterToolUse(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        $agent = $this->createStreamingAgentWithArticleAndErrorTools($llmClient);
+        $toolInput = json_encode(['id' => 1]);
+
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($agent->runStream('Use limited tools', AgentOptions::withTools(['article_get'])));
+
+        self::assertCount(2, $llmClient->calls);
+        self::assertSame(['article_get'], array_map(
+            static fn (Tool $tool): string => $tool->name,
+            $llmClient->calls[1]['tools'],
+        ));
+    }
+
+    public function testRunStreamWithUnknownToolFilterThrows(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unknown tool(s): missing_tool');
+
+        iterator_to_array($this->agent->runStream('Use missing tool', AgentOptions::withTools(['missing_tool'])));
+    }
+
+    public function testRunStreamWithDisabledToolCallReturnsErrorWithoutDispatching(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        $agent = $this->createStreamingAgentWithArticleAndErrorTools($llmClient);
+        $toolInput = json_encode([]);
+
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'error_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'The disabled tool was not used.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($agent->runStream('Try disabled tool', AgentOptions::withTools(['article_get'])));
+
+        $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
+        self::assertContains(AgentEvent::TOOL_RESULT, $types);
+        $toolResultMessage = $llmClient->calls[1]['messages'][2];
+        self::assertTrue($toolResultMessage->content[0]['is_error']);
+        self::assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
     }
 
     public function testMaxIterationsReached(): void
@@ -314,5 +404,34 @@ final class StreamingAgentTest extends TestCase
         self::assertCount(2, $this->agent->messages);
         self::assertSame('user', $this->agent->messages[0]->role);
         self::assertSame('assistant', $this->agent->messages[1]->role);
+    }
+
+    private function createStreamingAgentWithArticleAndErrorTools(FakeStreamingLlmClient $llmClient): StreamingAgent
+    {
+        $injector = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource = $injector->getInstance(ResourceInterface::class);
+        $registry = new ToolRegistry();
+        $registry->register('article_get', 'app://self/article', 'get');
+        $registry->register('error_get', 'app://self/error', 'get');
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+
+        return new StreamingAgent(
+            client: $llmClient,
+            dispatcher: $dispatcher,
+            tools: [
+                new Tool('article_get', 'Get an article', [
+                    'type' => 'object',
+                    'properties' => ['id' => ['type' => 'integer']],
+                    'required' => ['id'],
+                ]),
+                new Tool('error_get', 'Get error resource', [
+                    'type' => 'object',
+                    'properties' => [],
+                    'required' => [],
+                ]),
+            ],
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
     }
 }

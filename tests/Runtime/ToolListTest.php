@@ -24,6 +24,7 @@ final class ToolListTest extends TestCase
         $toolList = new ToolList($tools);
 
         $this->assertTrue($toolList->isConfirmable('delete_user'));
+        $this->assertTrue($toolList->has('delete_user'));
     }
 
     public function testIsConfirmableReturnsFalseForNonConfirmableTool(): void
@@ -46,6 +47,7 @@ final class ToolListTest extends TestCase
         $toolList = new ToolList([]);
 
         $this->assertFalse($toolList->isConfirmable('unknown'));
+        $this->assertFalse($toolList->has('unknown'));
     }
 
     public function testMixedConfirmableTools(): void
