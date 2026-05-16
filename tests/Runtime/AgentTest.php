@@ -64,6 +64,10 @@ final class AgentTest extends TestCase
 
         $this->assertTrue($response->completed);
         $this->assertSame('Hello! How can I help you?', $response->getText());
+        $this->assertCount(2, $this->agent->messages);
+        $this->assertSame('user', $this->agent->messages[0]->role);
+        $this->assertSame('assistant', $this->agent->messages[1]->role);
+        $this->assertSame($this->agent->messages, $response->messages);
     }
 
     public function testMaxIterationsReached(): void
@@ -89,6 +93,8 @@ final class AgentTest extends TestCase
         $this->assertFalse($response->completed);
         $this->assertSame(AgentResponse::STOP_MAX_TOKENS, $response->stopReason);
         $this->assertSame('This response was cut off...', $response->getText());
+        $this->assertCount(2, $response->messages);
+        $this->assertSame('assistant', $response->messages[1]->role);
     }
 
     public function testStopSequenceResponse(): void
@@ -99,6 +105,8 @@ final class AgentTest extends TestCase
 
         $this->assertFalse($response->completed);
         $this->assertSame(AgentResponse::STOP_STOP_SEQUENCE, $response->stopReason);
+        $this->assertCount(2, $response->messages);
+        $this->assertSame('assistant', $response->messages[1]->role);
     }
 
     public function testUnknownStopReasonTreatedAsCompleted(): void
@@ -112,6 +120,24 @@ final class AgentTest extends TestCase
         $response = $this->agent->run('Test unknown stop reason');
 
         $this->assertTrue($response->completed);
+        $this->assertCount(2, $response->messages);
+        $this->assertSame('assistant', $response->messages[1]->role);
+    }
+
+    public function testEmptyAssistantResponseIsNotRecorded(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'end_turn',
+            content: [],
+            toolCalls: [],
+        ));
+
+        $response = $this->agent->run('Return nothing');
+
+        $this->assertTrue($response->completed);
+        $this->assertCount(1, $this->agent->messages);
+        $this->assertSame('user', $this->agent->messages[0]->role);
+        $this->assertSame($this->agent->messages, $response->messages);
     }
 
     public function testToolUseWithSuccessfulDispatch(): void
@@ -267,7 +293,7 @@ final class AgentTest extends TestCase
         $response = $this->agent->run('Follow up question');
 
         $this->assertTrue($response->completed);
-        $this->assertCount(3, $this->agent->messages); // 2 history + 1 new user
+        $this->assertCount(4, $this->agent->messages); // 2 history + new user + assistant response
     }
 
     public function testAgentResponseCompleted(): void
@@ -277,6 +303,18 @@ final class AgentTest extends TestCase
         $this->assertTrue($response->completed);
         $this->assertSame('Done', $response->getText());
         $this->assertEmpty($response->messages);
+    }
+
+    public function testAgentResponseCompletedWithMessages(): void
+    {
+        $messages = [
+            Message::user('test'),
+            Message::assistant([['type' => 'text', 'text' => 'Done']]),
+        ];
+        $response = AgentResponse::completed([['type' => 'text', 'text' => 'Done']], $messages);
+
+        $this->assertTrue($response->completed);
+        $this->assertSame($messages, $response->messages);
     }
 
     public function testAgentResponseMaxIterations(): void

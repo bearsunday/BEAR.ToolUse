@@ -109,6 +109,8 @@ final class StreamingAgent implements StreamingAgentInterface
             }
 
             // Other stop reasons (max_tokens, stop_sequence) - complete
+            $this->recordContentBlocks($state);
+
             yield AgentEvent::completed($fullText);
 
             return;
