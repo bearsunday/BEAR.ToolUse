@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(AlpsSemanticDictionary::class)]
+#[CoversClass(AlpsDescriptorIndex::class)]
 final class AlpsSemanticDictionaryTest extends TestCase
 {
     private AlpsSemanticDictionary $dictionary;
@@ -59,6 +60,21 @@ final class AlpsSemanticDictionaryTest extends TestCase
         $this->assertNull($this->dictionary->get('createUser'));
     }
 
+    public function testGetDescriptorIncludesNonSemanticDescriptor(): void
+    {
+        $descriptor = $this->dictionary->getDescriptor('createUser');
+
+        $this->assertSame('createUser', $descriptor['id'] ?? null);
+        $this->assertSame('safe', $descriptor['type'] ?? null);
+        $this->assertSame('Create user transition', $descriptor['description'] ?? null);
+        $this->assertNull($descriptor['href'] ?? null);
+    }
+
+    public function testGetDescriptorForMissingId(): void
+    {
+        $this->assertNull($this->dictionary->getDescriptor('nonexistent'));
+    }
+
     public function testLocalHrefResolvesToReferencedDescription(): void
     {
         // userIdAlias has href="#userId" → resolves to "User identifier"
@@ -82,6 +98,10 @@ final class AlpsSemanticDictionaryTest extends TestCase
     {
         // href that does not start with '#' is not resolved (cross-file ref unsupported)
         $this->assertNull($this->dictionary->get('externalRef'));
+
+        $descriptor = $this->dictionary->getDescriptor('externalRef');
+        $this->assertSame('https://example.com/profile.json#userId', $descriptor['href'] ?? null);
+        $this->assertNull($descriptor['description'] ?? null);
     }
 
     public function testLoadXmlProfile(): void

@@ -186,6 +186,23 @@ $response = $agent->run(
 
 `OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents.
 
+You can use ALPS as runtime context with `AlpsContextInputProcessor`. It injects matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs.
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\AlpsContextInputProcessor;
+use BEAR\ToolUse\Schema\AlpsSemanticDictionary;
+
+$alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
+
+$response = $agent->run(
+    'Find this user',
+    AgentOptions::withProcessors(inputProcessors: [
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
 ### 7. Agent-as-Tool / Named Subagents
 
 Register specialist agents in an `AgentPool`, then expose them as tools named `ask_{name}`. Subagent conversation history is isolated per call.
@@ -587,7 +604,7 @@ $dictionary = new AlpsSemanticDictionary('/path/to/profile.json');
 $converter = new SchemaConverter($dictionary);
 ```
 
-Both **JSON** and **XML** ALPS profiles are supported (format is detected from the file extension). The `title` or `doc` of `semantic` descriptors is used as the parameter description. Same-profile `href="#id"` references are resolved automatically; non-semantic descriptors (`safe` / `unsafe` / `idempotent`) are excluded.
+Both **JSON** and **XML** ALPS profiles are supported (format is detected from the file extension). The `title` or `doc` of `semantic` descriptors is used as the parameter description. Same-profile `href="#id"` references are resolved automatically. For parameter descriptions, non-semantic descriptors (`safe` / `unsafe` / `idempotent`) are excluded; `AlpsContextInputProcessor` can still use matching transition descriptors as runtime context.
 
 ## Parameter Description Priority
 
@@ -671,6 +688,7 @@ Errors detected by the Dispatcher:
 | `AgentFactory` | Builder for agents (sync and streaming) |
 | `AgentOptions` | Per-run options such as tool filtering |
 | `LlmRequest` | LLM request passed to input processors |
+| `AlpsContextInputProcessor` | Adds relevant ALPS descriptors to each LLM request |
 | `AgentProfile` | Configuration for a named subagent |
 | `AgentPool` | Registry and factory for named subagents |
 | `AgentDelegator` | Dispatches `ask_*` tool calls to subagents |

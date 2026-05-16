@@ -186,6 +186,23 @@ $response = $agent->run(
 
 `OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。
 
+`AlpsContextInputProcessor` を使うと、ALPS を runtime context として注入できます。現在の LLM 呼び出しで利用可能な tool に一致する `safe` / `unsafe` などの transition descriptor と、tool input に一致する semantic descriptor を追加します。
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\AlpsContextInputProcessor;
+use BEAR\ToolUse\Schema\AlpsSemanticDictionary;
+
+$alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
+
+$response = $agent->run(
+    'このユーザーを探して',
+    AgentOptions::withProcessors(inputProcessors: [
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
 ### 7. Agent-as-Tool / Named Subagent
 
 専門エージェントを `AgentPool` に登録すると、`ask_{name}` という tool として公開できます。Subagent の会話履歴は呼び出しごとに隔離されます。
@@ -587,7 +604,7 @@ $dictionary = new AlpsSemanticDictionary('/path/to/profile.json');
 $converter = new SchemaConverter($dictionary);
 ```
 
-**JSON**と**XML**の両形式の ALPS プロファイルをサポートしています（ファイル拡張子で自動判別）。`semantic`記述子の`title`または`doc`がパラメータの説明として使用されます。同一プロファイル内の`href="#id"`参照は自動解決され、`safe` / `unsafe` / `idempotent`（トランジション）記述子は除外されます。
+**JSON**と**XML**の両形式の ALPS プロファイルをサポートしています（ファイル拡張子で自動判別）。`semantic`記述子の`title`または`doc`がパラメータの説明として使用されます。同一プロファイル内の`href="#id"`参照は自動解決されます。パラメータ説明では`safe` / `unsafe` / `idempotent`（トランジション）記述子は除外されますが、`AlpsContextInputProcessor` は一致する transition descriptor を runtime context として利用できます。
 
 ## パラメータ説明の優先順位
 
@@ -671,6 +688,7 @@ Dispatcherが検出するエラー:
 | `AgentFactory` | エージェントのビルダー（同期・ストリーミング） |
 | `AgentOptions` | ツール制限などの呼び出し単位オプション |
 | `LlmRequest` | Input Processor に渡される LLM request |
+| `AlpsContextInputProcessor` | 関連する ALPS descriptor を各 LLM request に追加 |
 | `AgentProfile` | Named Subagent の設定 |
 | `AgentPool` | Named Subagent の登録・作成 |
 | `AgentDelegator` | `ask_*` tool call を Subagent に委譲 |

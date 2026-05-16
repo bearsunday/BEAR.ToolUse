@@ -22,9 +22,7 @@ use function libxml_use_internal_errors;
 use function pathinfo;
 use function simplexml_load_string;
 use function sprintf;
-use function str_starts_with;
 use function strtolower;
-use function substr;
 use function trim;
 
 use const JSON_THROW_ON_ERROR;
@@ -35,9 +33,10 @@ use const PATHINFO_EXTENSION;
  *
  * Parses an ALPS profile (JSON or XML) and exposes an
  * `id` => description mapping for semantic descriptors.
+ * Full descriptors, including transitions, are available through getDescriptor().
  *
  * Behavior matches koriym/app-state-diagram for the subset we need:
- *  - Only `type === 'semantic'` descriptors are included (transitions excluded).
+ *  - Only `type === 'semantic'` descriptors are included in the array mapping.
  *  - Same-profile `href="#id"` references resolve to the referenced description.
  *  - Cross-file href references are not supported.
  *
@@ -46,8 +45,7 @@ use const PATHINFO_EXTENSION;
  */
 final class AlpsSemanticDictionary extends ArrayObject
 {
-    /** Maximum href chain depth (e.g. A -> B -> C). Guards against cycles. */
-    private const HREF_RESOLUTION_DEPTH = 10;
+    private AlpsDescriptorIndex $descriptorIndex;
 
     public function __construct(string $profilePath)
     {
@@ -60,7 +58,9 @@ final class AlpsSemanticDictionary extends ArrayObject
             ),
         };
 
-        parent::__construct($this->buildDictionary($entries));
+        $this->descriptorIndex = new AlpsDescriptorIndex($entries);
+
+        parent::__construct($this->descriptorIndex->semanticDictionary());
     }
 
     public function get(string $key): string|null
@@ -68,71 +68,10 @@ final class AlpsSemanticDictionary extends ArrayObject
         return $this[$key] ?? null;
     }
 
-    /**
-     * @param list<Entry> $entries
-     *
-     * @return array<string, string>
-     */
-    private function buildDictionary(array $entries): array
+    /** @return Entry|null */
+    public function getDescriptor(string $id): array|null
     {
-        $semanticEntries = [];
-        foreach ($entries as $entry) {
-            if ($entry['type'] !== 'semantic') {
-                continue;
-            }
-
-            $semanticEntries[] = $entry;
-        }
-
-        $dictionary = [];
-        foreach ($semanticEntries as $entry) {
-            if ($entry['description'] === null) {
-                continue;
-            }
-
-            $dictionary[$entry['id']] = $entry['description'];
-        }
-
-        for ($depth = 0; $depth < self::HREF_RESOLUTION_DEPTH; $depth++) {
-            if (! $this->resolveHrefPass($semanticEntries, $dictionary)) {
-                break;
-            }
-        }
-
-        return $dictionary;
-    }
-
-    /**
-     * @param list<Entry>           $semanticEntries
-     * @param array<string, string> $dictionary
-     */
-    private function resolveHrefPass(array $semanticEntries, array &$dictionary): bool
-    {
-        $changed = false;
-        foreach ($semanticEntries as $entry) {
-            if (isset($dictionary[$entry['id']])) {
-                continue;
-            }
-
-            $href = $entry['href'];
-            if ($href === null) {
-                continue;
-            }
-
-            if (! str_starts_with($href, '#')) {
-                continue;
-            }
-
-            $referencedId = substr($href, 1);
-            if (! isset($dictionary[$referencedId])) {
-                continue;
-            }
-
-            $dictionary[$entry['id']] = $dictionary[$referencedId];
-            $changed = true;
-        }
-
-        return $changed;
+        return $this->descriptorIndex->get($id);
     }
 
     /** @return list<Entry> */
