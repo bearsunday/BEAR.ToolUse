@@ -27,7 +27,7 @@ use function json_decode;
  * receives approval via Generator::send(bool). If send() is not called
  * (e.g. iterator_to_array), the tool is denied by default (safe default).
  */
-final class StreamingAgent implements StreamingAgentInterface
+final class StreamingAgent implements OptionAwareStreamingAgentInterface
 {
     /** @var list<Message> */
     public array $messages = [];
@@ -47,7 +47,6 @@ final class StreamingAgent implements StreamingAgentInterface
     public function runStream(string $userMessage, AgentOptions|null $options = null): Generator
     {
         $runTools = $this->resolveTools($options);
-        $enforceToolList = $options?->enforcesToolList() ?? false;
 
         $this->messages[] = Message::user($userMessage);
         $fullText = '';
@@ -86,7 +85,6 @@ final class StreamingAgent implements StreamingAgentInterface
                     $state->pendingToolCalls,
                     $state->currentText,
                     $requestToolList,
-                    $enforceToolList,
                 );
                 while ($dispatchGen->valid()) {
                     /** @var AgentEvent $currentEvent */
@@ -108,7 +106,7 @@ final class StreamingAgent implements StreamingAgentInterface
                 continue;
             }
 
-            // Other stop reasons (max_tokens, stop_sequence) - complete
+            // Any terminal stop reason without pending tools is returned as a completed stream.
             $this->recordContentBlocks($state);
 
             yield AgentEvent::completed($fullText);
@@ -192,7 +190,6 @@ final class StreamingAgent implements StreamingAgentInterface
         array $pendingToolCalls,
         string $currentText,
         ToolList $toolList,
-        bool $enforceToolList,
     ): Generator {
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
@@ -204,7 +201,7 @@ final class StreamingAgent implements StreamingAgentInterface
                 input: $input,
             );
 
-            if ($enforceToolList && ! $toolList->has($toolCall->name)) {
+            if (! $toolList->has($toolCall->name)) {
                 $toolResults[] = ToolResult::error($toolCall->id, 'Tool is not enabled: ' . $toolCall->name);
 
                 yield AgentEvent::toolResult($pending->name);

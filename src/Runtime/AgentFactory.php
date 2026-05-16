@@ -21,7 +21,7 @@ final class AgentFactory
 
     public function __construct(
         private readonly LlmClientInterface $client,
-        private readonly DispatcherInterface $dispatcher,
+        private DispatcherInterface $dispatcher,
         private readonly ToolCollectorInterface $collector,
         private readonly ToolRegistryInterface $registry,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
@@ -67,6 +67,7 @@ final class AgentFactory
     public function addSubagents(AgentPool $pool): self
     {
         $this->addTools($pool->getTools());
+        $this->dispatcher = new AgentDelegator($pool, $this->dispatcher);
 
         return $this;
     }
@@ -74,7 +75,7 @@ final class AgentFactory
     /**
      * Create the agent
      */
-    public function create(string $systemPrompt, int $maxIterations = 10): AgentInterface
+    public function create(string $systemPrompt, int $maxIterations = 10): OptionAwareAgentInterface
     {
         return new Agent(
             client: $this->client,
@@ -89,7 +90,7 @@ final class AgentFactory
     /**
      * Create the streaming agent
      */
-    public function createStreaming(string $systemPrompt, int $maxIterations = 10): StreamingAgentInterface
+    public function createStreaming(string $systemPrompt, int $maxIterations = 10): OptionAwareStreamingAgentInterface
     {
         if ($this->streamingClient === null) {
             throw new StreamingNotConfiguredException('StreamingLlmClientInterface is not configured');

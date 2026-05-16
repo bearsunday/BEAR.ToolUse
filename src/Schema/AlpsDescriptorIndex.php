@@ -7,7 +7,10 @@ namespace BEAR\ToolUse\Schema;
 use function str_starts_with;
 use function substr;
 
-/** @phpstan-type Entry array{id: string, type: string, description: string|null, href: string|null} */
+/**
+ * @phpstan-type Entry array{id: string, type: string, description: string|null, href: string|null}
+ * @psalm-type Entry = array{id: string, type: string, description: string|null, href: string|null}
+ */
 final class AlpsDescriptorIndex
 {
     /** Maximum href chain depth (e.g. A -> B -> C). Guards against cycles. */

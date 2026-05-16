@@ -15,8 +15,11 @@ use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Schema\SchemaConverter;
+use BEAR\ToolUse\Schema\Tool;
 use BEAR\ToolUse\Schema\ToolCollector;
+use BEAR\ToolUse\Schema\ToolCollectorInterface;
 use InvalidArgumentException;
+use Override;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +31,8 @@ use function array_map;
 #[CoversClass(AgentPool::class)]
 #[CoversClass(AgentDelegator::class)]
 #[CoversClass(AgentFactory::class)]
+#[CoversClass(DenyConfirmationHandler::class)]
+#[CoversClass(ProfiledAgent::class)]
 final class AgentPoolTest extends TestCase
 {
     public function testRegisterAndGetProfile(): void
@@ -80,6 +85,7 @@ final class AgentPoolTest extends TestCase
         $this->assertSame('ask_critic', $tool->name);
         $this->assertSame('Review design risks', $tool->description);
         $this->assertSame(['message'], $tool->inputSchema['required']);
+        $this->assertTrue($tool->inputSchema['properties']['context']['additionalProperties']);
     }
 
     public function testDelegatorAskUsesProfileResources(): void
@@ -148,7 +154,7 @@ final class AgentPoolTest extends TestCase
 
         $this->assertFalse($result->isError);
         $this->assertSame('Risk found.', $result->content);
-        $this->assertSame("Review this.\n\nContext:\n{\"id\":1}", $llmClient->calls[0]['messages'][0]->content[0]['text']);
+        $this->assertSame("Review this.\n\n<context>\n{\"id\":1}\n</context>", $llmClient->calls[0]['messages'][0]->content[0]['text']);
     }
 
     public function testDelegatorCanDispatchKnownSubagentToolOnly(): void
@@ -203,6 +209,23 @@ final class AgentPoolTest extends TestCase
 
         $this->assertTrue($result->isError);
         $this->assertSame('Unknown agent: missing', $result->content);
+    }
+
+    public function testDelegatorFallsBackForUnknownAskTool(): void
+    {
+        [$pool] = $this->createPool();
+        $fallback = new class implements DispatcherInterface {
+            public function dispatch(ToolCall $toolCall): ToolResult
+            {
+                return ToolResult::success($toolCall->id, 'fallback ask result');
+            }
+        };
+        $delegator = new AgentDelegator($pool, $fallback);
+
+        $result = $delegator->dispatch(new ToolCall('call_1', 'ask_custom', ['message' => 'Hi']));
+
+        $this->assertFalse($result->isError);
+        $this->assertSame('fallback ask result', $result->content);
     }
 
     public function testDelegatorReturnsErrorForInvalidToolInput(): void
@@ -264,6 +287,119 @@ final class AgentPoolTest extends TestCase
         $this->assertSame('Subagent stopped: max_tokens', $result->content);
     }
 
+    public function testDelegatorConvertsSubagentExceptionToToolError(): void
+    {
+        [$pool] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+            resources: ['app://self/article'],
+            options: AgentOptions::withTools(['missing_tool']),
+        ));
+        $delegator = new AgentDelegator($pool);
+
+        $result = $delegator->dispatch(new ToolCall('call_1', 'ask_critic', ['message' => 'Review this.']));
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('InvalidArgumentException: Unknown tool(s): missing_tool', $result->content);
+    }
+
+    public function testPoolCreateAppliesProfileOptions(): void
+    {
+        [$pool, $llmClient] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+            resources: ['app://self/article', 'app://self/error'],
+            options: AgentOptions::withTools(['article_get']),
+        ));
+
+        $agent = $pool->create('critic');
+        $llmClient->queueToolUseResponse('call_1', 'error_get', []);
+        $llmClient->queueTextResponse('Rejected.');
+
+        $response = $agent->run('Try hidden tool.');
+
+        $this->assertTrue($response->completed);
+        $toolResultMessage = $llmClient->calls[1]['messages'][2];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testPoolCachesCollectedToolsPerProfile(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $dispatcher = new class implements DispatcherInterface {
+            #[Override]
+            public function dispatch(ToolCall $toolCall): ToolResult
+            {
+                return ToolResult::success($toolCall->id, 'unused');
+            }
+        };
+        $collector = new class implements ToolCollectorInterface {
+            public int $calls = 0;
+
+            /**
+             * @param list<string> $uris
+             *
+             * @return list<Tool>
+             */
+            #[Override]
+            public function collect(array $uris): array
+            {
+                $this->calls++;
+
+                return [
+                    new Tool('cached_get', 'Cached tool', [
+                        'type' => 'object',
+                        'properties' => [],
+                        'required' => [],
+                    ]),
+                ];
+            }
+        };
+        $pool = new AgentPool($llmClient, $dispatcher, $collector);
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+            resources: ['app://self/cached'],
+        ));
+
+        $pool->create('critic');
+        $pool->create('critic');
+
+        $this->assertSame(1, $collector->calls);
+    }
+
+    public function testProfiledAgentResetDelegatesToInnerAgent(): void
+    {
+        [$pool, $llmClient] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+        ));
+
+        $agent = $pool->create('critic');
+        $llmClient->queueTextResponse('Done.');
+        $agent->run('Review this.');
+        $agent->reset();
+        $llmClient->queueTextResponse('Again.');
+        $agent->run('Review again.');
+
+        $this->assertCount(1, $llmClient->calls[1]['messages']);
+    }
+
+    public function testDenyConfirmationHandlerDeniesEveryCall(): void
+    {
+        $handler = new DenyConfirmationHandler();
+
+        $this->assertFalse($handler->confirm(new ToolCall('call_1', 'dangerous_tool', []), 'Confirm?'));
+    }
+
     public function testMainAgentCanCallSubagentAsTool(): void
     {
         [$pool, $llmClient, $resourceDispatcher] = $this->createPool();
@@ -306,6 +442,29 @@ final class AgentPoolTest extends TestCase
         $factory->addSubagents($pool);
 
         $this->assertSame('ask_critic', $factory->getTools()[0]->name);
+    }
+
+    public function testAgentFactoryWiresSubagentDispatcher(): void
+    {
+        [$pool, $llmClient, $resourceDispatcher, $collector, $registry] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+        ));
+
+        $factory = new AgentFactory($llmClient, $resourceDispatcher, $collector, $registry);
+        $factory->addSubagents($pool);
+
+        $llmClient->queueToolUseResponse('call_1', 'ask_critic', ['message' => 'Review this.']);
+        $llmClient->queueTextResponse('Risk found.');
+        $llmClient->queueTextResponse('Delegation complete.');
+
+        $agent = $factory->create('You are a main agent.');
+        $response = $agent->run('Use critic.');
+
+        $this->assertTrue($response->completed);
+        $this->assertSame('Risk found.', $llmClient->calls[2]['messages'][2]->content[0]['content']);
     }
 
     /** @return array{AgentPool, FakeLlmClient, Dispatcher, ToolCollector, ToolRegistry} */

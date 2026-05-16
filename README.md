@@ -184,9 +184,9 @@ $response = $agent->run(
 );
 ```
 
-`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents.
+`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents. It must return the same concrete type it receives. Text content may be rewritten, but tool-use control data must be preserved so the runtime can dispatch tool calls safely.
 
-You can use ALPS as runtime context with `AlpsContextInputProcessor`. It injects matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs.
+You can use ALPS as runtime context with `AlpsContextInputProcessor`. It injects matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs. Tool descriptors match by tool name (or its camelCase form), so an `article_get` tool needs an ALPS descriptor id such as `article_get` or `articleGet`. Tool input parameters use semantic descriptors only.
 
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
@@ -204,7 +204,7 @@ $response = $agent->run(
 );
 ```
 
-You can also use ALPS transition types as a per-call tool policy. The `safeOnly()` policy exposes only tools whose matching ALPS descriptor is `safe` or `idempotent`; tools without a matching descriptor are hidden unless you use `safeOnlyAllowingUnknownTools()`.
+You can also use ALPS transition types as a per-call tool policy. The `safeOnly()` policy exposes only tools whose matching ALPS descriptor is `safe`; tools without a matching descriptor are hidden unless you use `safeOnlyAllowingUnknownTools()`. Use `safeAndIdempotent()` when idempotent state-changing transitions are also allowed. Apply this policy after the ALPS profile covers the tools you expect, or use the allowing-unknown variant during migration. When combining policy and context processors, place the policy first so `AlpsContextInputProcessor` describes only the tools still available after filtering.
 
 ```php
 $response = $agent->run(
@@ -252,6 +252,8 @@ You can also call a subagent directly:
 $response = $delegator->ask('critic', 'What are the risks?', ['articleId' => 1]);
 ```
 
+Subagents created by `AgentPool` deny confirmable tools by default when no `ConfirmationHandlerInterface` is configured on the pool. Pass a confirmation handler to `AgentPool` when subagents should be allowed to execute `#[Tool(confirm: true)]` resources.
+
 ### 8. Conversation History
 
 The agent maintains conversation history across multiple `run()` calls.
@@ -273,6 +275,8 @@ $response = $agent->run('Tell me more about this user');
 // Clear history to start fresh
 $agent->reset();
 ```
+
+`AgentResponse::$messages` contains the conversation history snapshot when the response came from `Agent::run()`. If you call a factory such as `AgentResponse::completed($content)` directly, the history is empty unless you pass it explicitly.
 
 ### 9. Streaming Agent
 
@@ -425,7 +429,7 @@ Y → Tool executed
 N → "User cancelled this operation." → LLM: "Understood."
 ```
 
-If no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking).
+For a directly created `Agent`, if no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking). Subagents created by `AgentPool` are stricter: without a pool-level confirmation handler, confirmable subagent tool calls are cancelled by default.
 
 ### Streaming Agent Confirmation
 
@@ -685,7 +689,9 @@ Errors detected by the Dispatcher:
 | `SchemaConverterInterface` | Converts resources to tool definitions |
 | `ToolCollectorInterface` | Collects and registers tools |
 | `AgentInterface` | Agent runtime |
+| `OptionAwareAgentInterface` | Agent runtime with per-run `AgentOptions` |
 | `StreamingAgentInterface` | Streaming agent runtime |
+| `OptionAwareStreamingAgentInterface` | Streaming agent runtime with per-run `AgentOptions` |
 | `ToolResultFilterInterface` | Response filter before sending to LLM |
 | `InputProcessorInterface` | Processes each LLM request before the call |
 | `OutputProcessorInterface` | Processes each LLM response or stream event after the call |

@@ -13,7 +13,13 @@ use function lcfirst;
 use function str_replace;
 use function ucwords;
 
-/** Filters available tools by matching ALPS descriptor types */
+/**
+ * Filters available tools by matching ALPS descriptor types.
+ *
+ * Tool names must match ALPS descriptor ids (or their camelCase form). Tools
+ * without a matching descriptor are hidden unless an allowing-unknown factory is
+ * used.
+ */
 final readonly class AlpsToolPolicyInputProcessor implements InputProcessorInterface
 {
     public const UNKNOWN_TOOLS_HIDDEN = 'hidden';
@@ -32,10 +38,20 @@ final readonly class AlpsToolPolicyInputProcessor implements InputProcessorInter
 
     public static function safeOnly(AlpsSemanticDictionary $dictionary): self
     {
-        return new self($dictionary, ['safe', 'idempotent']);
+        return new self($dictionary, ['safe']);
     }
 
     public static function safeOnlyAllowingUnknownTools(AlpsSemanticDictionary $dictionary): self
+    {
+        return new self($dictionary, ['safe'], self::UNKNOWN_TOOLS_ALLOWED);
+    }
+
+    public static function safeAndIdempotent(AlpsSemanticDictionary $dictionary): self
+    {
+        return new self($dictionary, ['safe', 'idempotent']);
+    }
+
+    public static function safeAndIdempotentAllowingUnknownTools(AlpsSemanticDictionary $dictionary): self
     {
         return new self($dictionary, ['safe', 'idempotent'], self::UNKNOWN_TOOLS_ALLOWED);
     }

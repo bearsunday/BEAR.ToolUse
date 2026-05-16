@@ -15,7 +15,12 @@ use function str_replace;
 use function ucwords;
 
 /**
- * Adds ALPS semantic context for the tools available in an LLM call
+ * Adds ALPS semantic context for the tools available in an LLM call.
+ *
+ * Tool descriptions are resolved from ALPS descriptors whose id matches the tool
+ * name (or its camelCase form), including transition descriptors such as `safe`
+ * and `unsafe`. Parameter descriptions are resolved only from semantic
+ * descriptors whose id matches the input parameter name.
  */
 final readonly class AlpsContextInputProcessor implements InputProcessorInterface
 {

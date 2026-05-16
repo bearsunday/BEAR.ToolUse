@@ -8,6 +8,7 @@ use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use Override;
+use Throwable;
 
 use function array_keys;
 use function is_array;
@@ -42,10 +43,9 @@ final readonly class AgentDelegator implements DispatcherInterface
      */
     public function ask(string $name, string $message, array $context = []): AgentResponse
     {
-        $profile = $this->pool->get($name);
         $agent = $this->pool->create($name);
 
-        return $agent->run($this->buildMessage($message, $context), $profile->options);
+        return $agent->run($this->buildMessage($message, $context));
     }
 
     public function canDispatch(string $toolName): bool
@@ -67,7 +67,8 @@ final readonly class AgentDelegator implements DispatcherInterface
 
         $agentName = $this->agentNameFromTool($toolCall->name);
         if (! $this->pool->has($agentName)) {
-            return ToolResult::error($toolCall->id, sprintf('Unknown agent: %s', $agentName));
+            return $this->fallback?->dispatch($toolCall)
+                ?? ToolResult::error($toolCall->id, sprintf('Unknown agent: %s', $agentName));
         }
 
         $message = $toolCall->input['message'] ?? null;
@@ -80,7 +81,12 @@ final readonly class AgentDelegator implements DispatcherInterface
             return ToolResult::error($toolCall->id, 'Agent tool input "context" must be an object.');
         }
 
-        $response = $this->ask($agentName, $message, $context);
+        try {
+            $response = $this->ask($agentName, $message, $context);
+        } catch (Throwable $e) {
+            return ToolResult::error($toolCall->id, $e::class . ': ' . $e->getMessage());
+        }
+
         if (! $response->completed) {
             return ToolResult::error($toolCall->id, sprintf(
                 'Subagent stopped: %s',
@@ -122,6 +128,6 @@ final readonly class AgentDelegator implements DispatcherInterface
 
         $encodedContext = json_encode($context, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        return $message . "\n\nContext:\n" . $encodedContext;
+        return $message . "\n\n<context>\n" . $encodedContext . "\n</context>";
     }
 }

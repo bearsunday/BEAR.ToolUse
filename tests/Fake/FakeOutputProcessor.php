@@ -28,6 +28,17 @@ final class FakeOutputProcessor implements OutputProcessorInterface
         $this->calls++;
 
         if ($output instanceof LlmResponse) {
+            if ($output->stopReason === 'tool_use') {
+                $content = [];
+                foreach ($output->content as $block) {
+                    $content[] = ($block['type'] ?? null) === 'text'
+                        ? ['type' => 'text', 'text' => $this->replacementText]
+                        : $block;
+                }
+
+                return new LlmResponse($output->stopReason, $content, $output->toolCalls);
+            }
+
             return new LlmResponse(
                 $output->stopReason,
                 [['type' => 'text', 'text' => $this->replacementText]],

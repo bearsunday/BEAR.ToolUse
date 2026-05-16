@@ -52,6 +52,7 @@ final readonly class AgentProfile
                     'context' => [
                         'type' => 'object',
                         'description' => 'Additional context for the subagent.',
+                        'additionalProperties' => true,
                     ],
                 ],
                 'required' => ['message'],
