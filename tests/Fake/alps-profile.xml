@@ -12,6 +12,8 @@
     </descriptor>
   </descriptor>
   <descriptor id="createUser" type="safe" title="Create user transition"/>
+  <descriptor id="syncUser" type="idempotent" title="Synchronize user transition"/>
+  <descriptor id="deleteUser" type="unsafe" title="Delete user transition"/>
   <descriptor id="userIdAlias" type="semantic" href="#userId"/>
   <descriptor id="danglingHref" type="semantic" href="#nonExistent"/>
   <descriptor id="chainA" type="semantic" href="#chainB"/>

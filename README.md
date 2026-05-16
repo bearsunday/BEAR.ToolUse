@@ -191,6 +191,7 @@ You can use ALPS as runtime context with `AlpsContextInputProcessor`. It injects
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
 use BEAR\ToolUse\Runtime\AlpsContextInputProcessor;
+use BEAR\ToolUse\Runtime\AlpsToolPolicyInputProcessor;
 use BEAR\ToolUse\Schema\AlpsSemanticDictionary;
 
 $alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
@@ -198,6 +199,18 @@ $alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
 $response = $agent->run(
     'Find this user',
     AgentOptions::withProcessors(inputProcessors: [
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
+You can also use ALPS transition types as a per-call tool policy. The `safeOnly()` policy exposes only tools whose matching ALPS descriptor is `safe` or `idempotent`; tools without a matching descriptor are hidden unless you use `safeOnlyAllowingUnknownTools()`.
+
+```php
+$response = $agent->run(
+    'Summarize the current account state without changing it',
+    AgentOptions::withProcessors(inputProcessors: [
+        AlpsToolPolicyInputProcessor::safeOnly($alps),
         new AlpsContextInputProcessor($alps),
     ]),
 );
@@ -689,6 +702,7 @@ Errors detected by the Dispatcher:
 | `AgentOptions` | Per-run options such as tool filtering |
 | `LlmRequest` | LLM request passed to input processors |
 | `AlpsContextInputProcessor` | Adds relevant ALPS descriptors to each LLM request |
+| `AlpsToolPolicyInputProcessor` | Filters tools by matching ALPS transition types |
 | `AgentProfile` | Configuration for a named subagent |
 | `AgentPool` | Registry and factory for named subagents |
 | `AgentDelegator` | Dispatches `ask_*` tool calls to subagents |
