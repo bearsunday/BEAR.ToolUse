@@ -186,6 +186,20 @@ $response = $agent->run(
 
 `OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。
 
+#### フックの使い分け
+
+拡張フックは意図的に直交していますが、同じような処理を複数の場所で実装できる場合があります。影響させたいレイヤに合うフックを選んでください。
+
+| やりたいこと | 使うもの | 理由 |
+|---|---|---|
+| LLM 呼び出し前に記憶・ポリシー・文脈を追加する | `InputProcessorInterface` | 各 LLM 呼び出し前に実行され、system prompt、messages、tools を変更できるため |
+| LLM 応答全体を正規化・検閲する | `OutputProcessorInterface` | LLM 呼び出し後の response または stream event 全体を見られるため |
+| tool 実行ログ・監査ログを記録する | `ToolCallObserverInterface` | 結果を変更せず、すべての dispatch 経路を観測できるため |
+| tool のレイテンシや成功／失敗メトリクスを送る | `ToolCallObserverInterface` | 各 dispatch の `durationMs` を受け取れるため |
+| 特定 tool の成功レスポンスをマスク・削減・整形する | `#[Tool(filter: ...)]` | tool 固有に、LLM へ返す結果そのものを変換できるため |
+
+目安として、LLM request/response 全体の変換には Processor、変換しないテレメトリには Observer、tool 固有の結果変換には Filter を使います。
+
 ### 7. Agent-as-Tool / Named Subagent
 
 専門エージェントを `AgentPool` に登録すると、`ask_{name}` という tool として公開できます。Subagent の会話履歴は呼び出しごとに隔離されます。
@@ -215,6 +229,8 @@ $agent = $factory
 // LLM が ask_critic を呼ぶと、AgentDelegator が critic agent を実行し、
 // 結果を通常の tool_result として LLM に返します。
 ```
+
+`addSubagents($pool)` は、LLM に送る tool list に `ask_*` の tool 定義を追加するだけです。実行時にそれらの tool call を処理するには、その Agent の dispatcher として `AgentDelegator` を使う必要があります。同じ Agent が通常の resource tool も公開する場合は、通常の `Dispatcher` を fallback として渡してください。DI モジュールで `DispatcherInterface` を直接 `Dispatcher` に bind している場合、subagent を公開する Agent では `AgentDelegator` を使うように構成してください。
 
 Subagent は直接呼び出すこともできます。
 

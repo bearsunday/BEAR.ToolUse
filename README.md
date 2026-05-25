@@ -186,6 +186,20 @@ $response = $agent->run(
 
 `OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents.
 
+#### Choosing the Right Extension Hook
+
+The extension hooks are intentionally orthogonal, but some tasks can be implemented in more than one place. Prefer the hook that matches the layer you want to affect:
+
+| Task | Use | Why |
+|---|---|---|
+| Add memory, policy, or request context before the LLM call | `InputProcessorInterface` | It runs before every LLM call and can rewrite the system prompt, messages, or tools. |
+| Normalize or moderate the full LLM response | `OutputProcessorInterface` | It sees each LLM response or stream event after the call. |
+| Record tool execution logs or audit trails | `ToolCallObserverInterface` | It observes every dispatch path without changing the result. |
+| Emit tool latency or success/error metrics | `ToolCallObserverInterface` | It receives `durationMs` for each dispatch. |
+| Redact, trim, or reshape one tool's successful response | `#[Tool(filter: ...)]` | It is tool-specific and changes exactly what is sent back to the LLM. |
+
+As a rule of thumb: use processors for LLM request/response transformation, observers for non-mutating telemetry, and filters for tool-specific result transformation.
+
 ### 7. Agent-as-Tool / Named Subagents
 
 Register specialist agents in an `AgentPool`, then expose them as tools named `ask_{name}`. Subagent conversation history is isolated per call.
@@ -215,6 +229,8 @@ $agent = $factory
 // When the LLM calls ask_critic, AgentDelegator runs the critic agent and
 // feeds the result back as a normal tool_result.
 ```
+
+`addSubagents($pool)` only adds the `ask_*` tool definitions to the list sent to the LLM. To execute those tool calls, the agent must use an `AgentDelegator` as its dispatcher. Pass the normal resource `Dispatcher` as the fallback when the same agent also exposes resource tools. If your DI module binds `DispatcherInterface` directly to `Dispatcher`, configure the agent that exposes subagents to use `AgentDelegator` instead.
 
 You can also call a subagent directly:
 
