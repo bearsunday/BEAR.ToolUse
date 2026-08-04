@@ -48,6 +48,37 @@ final class ToolListTest extends TestCase
         $this->assertFalse($toolList->isConfirmable('unknown'));
     }
 
+    public function testIsClientReturnsTrueForClientTool(): void
+    {
+        $tools = [
+            new Tool('ui_update', 'Update a form field on the client', [
+                'type' => 'object',
+                'properties' => [],
+                'required' => [],
+            ], client: true),
+        ];
+
+        $toolList = new ToolList($tools);
+
+        $this->assertTrue($toolList->isClient('ui_update'));
+    }
+
+    public function testIsClientReturnsFalseForServerTool(): void
+    {
+        $tools = [
+            new Tool('get_user', 'Get a user', [
+                'type' => 'object',
+                'properties' => [],
+                'required' => [],
+            ]),
+        ];
+
+        $toolList = new ToolList($tools);
+
+        $this->assertFalse($toolList->isClient('get_user'));
+        $this->assertFalse($toolList->isClient('unknown'));
+    }
+
     public function testMixedConfirmableTools(): void
     {
         $tools = [

@@ -14,6 +14,7 @@ use BEAR\ToolUse\Fake\FakeConfirmationHandler;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Schema\SchemaConverter;
+use BEAR\ToolUse\Schema\Tool;
 use BEAR\ToolUse\Schema\ToolCollector;
 use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -59,6 +60,31 @@ final class AgentFactoryTest extends TestCase
 
         $tools = $this->factory->getTools();
         $this->assertCount(3, $tools);
+    }
+
+    public function testAddClientTools(): void
+    {
+        $unflagged = new Tool('ui_update', 'Update a form field on the client', [
+            'type' => 'object',
+            'properties' => ['field' => ['type' => 'string']],
+            'required' => ['field'],
+        ]);
+        $flagged = new Tool('ui_highlight', 'Highlight a form field on the client', [
+            'type' => 'object',
+            'properties' => ['field' => ['type' => 'string']],
+            'required' => ['field'],
+        ], client: true);
+
+        $result = $this->factory->addClientTools([$unflagged, $flagged]);
+
+        $this->assertSame($this->factory, $result);
+        $tools = $this->factory->getTools();
+        $this->assertCount(2, $tools);
+        // The client flag is enforced even when the given Tool lacks it
+        $this->assertTrue($tools[0]->client);
+        $this->assertSame('ui_update', $tools[0]->name);
+        $this->assertTrue($tools[1]->client);
+        $this->assertSame($flagged, $tools[1]);
     }
 
     public function testFluentInterface(): void

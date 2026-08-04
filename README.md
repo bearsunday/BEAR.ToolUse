@@ -327,6 +327,91 @@ StreamingAgent resumes: tool executed or cancelled
 
 If `send()` is not called (e.g. `iterator_to_array()`), the tool is **denied by default** (safe default).
 
+## Client Tools
+
+Expose tools that are executed by the client (browser UI, CLI, edge app) instead of being dispatched to a resource. When the LLM calls a client tool, the run ends with the pending calls handed to the consumer; execute them on the client, then resume the conversation with the results.
+
+This enables frontend tool calling: the LLM can propose UI updates (e.g. fill a form field) that the client applies — with the user in the loop — and report back.
+
+### Register Client Tools
+
+Client tools are plain `Tool` definitions, not resources. Register them with `addClientTools()`:
+
+```php
+use BEAR\ToolUse\Schema\Tool;
+
+$agent = $agentFactory
+    ->addResources(['app://self/article'])
+    ->addClientTools([
+        new Tool('update_editor_field', 'Update a field in the editor UI', [
+            'type' => 'object',
+            'properties' => [
+                'field' => ['type' => 'string', 'enum' => ['title', 'description']],
+                'value' => ['type' => 'string'],
+            ],
+            'required' => ['field', 'value'],
+        ]),
+    ])
+    ->create('You are an editorial assistant.');
+```
+
+The `client: true` flag is enforced automatically.
+
+### Synchronous Agent
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\AgentResponse;
+
+$response = $agent->run('Improve the description');
+
+if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
+    foreach ($response->clientToolCalls as $call) {
+        // Execute on the client using $call->id, $call->name, $call->input
+    }
+
+    // Feed the execution results back and continue the loop
+    $final = $agent->resume([ToolResult::success($call->id, ['applied' => true])]);
+}
+```
+
+### Streaming Agent
+
+```php
+use BEAR\ToolUse\Runtime\AgentEvent;
+
+foreach ($agent->runStream($userMessage) as $event) {
+    if ($event->type === AgentEvent::CLIENT_TOOL_CALL) {
+        // Forward toolName / toolId / input to the client (e.g. over SSE)
+    }
+}
+
+// The stream ends after CLIENT_TOOL_CALL events. Continue once results arrive:
+foreach ($agent->resumeStream([ToolResult::success($toolId, $result)]) as $event) {
+    // ...
+}
+```
+
+### How It Works
+
+```text
+LLM: tool_use update_editor_field({field: "description", value: "..."})
+  ↓
+Server-side tools in the same turn are dispatched as usual
+  ↓
+Run ends: CLIENT_TOOL_CALL events (streaming) / STOP_CLIENT_TOOL_USE (sync)
+  ↓
+Client executes the tool (UI update, user accept/reject, ...)
+  ↓
+resume() / resumeStream() with the ToolResults
+  ↓
+LLM continues with all tool results of the turn
+```
+
+- Client tools are never dispatched server-side; the `Dispatcher` is bypassed entirely.
+- When a turn mixes server and client tool calls, server results are held in the agent instance and merged automatically on `resume()` / `resumeStream()`.
+- In a stateless HTTP setup, rebuild `Agent::$messages` from your persisted conversation before resuming. Held server results live in the agent instance, so a fresh instance must be given every tool result of the interrupted turn (or replay only the client `tool_use` block).
+
 ## Response Filtering
 
 Use `filter` to reduce the response body before sending to the LLM. This improves token efficiency for resources returning large payloads.

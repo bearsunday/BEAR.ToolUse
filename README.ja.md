@@ -327,6 +327,91 @@ StreamingAgent が再開: ツール実行またはキャンセル
 
 `send()` が呼ばれない場合（例: `iterator_to_array()`）、ツールは**デフォルトで拒否**されます（安全なデフォルト）。
 
+## クライアントツール
+
+リソースにディスパッチせず、クライアント側（ブラウザUI・CLI・エッジアプリ等）で実行するツールを公開できます。LLMがクライアントツールを呼ぶと、ランは保留中の呼び出しを消費者に引き渡して終了します。クライアント側で実行し、結果を渡して会話を再開します。
+
+これによりフロントエンドツール呼び出しが実現できます。LLMがUI更新（フォームフィールドへの入力等）を提案し、クライアントがユーザーを介在させて適用し、結果をLLMに報告する形です。
+
+### クライアントツールの登録
+
+クライアントツールはリソースではなく、素の `Tool` 定義です。`addClientTools()` で登録します:
+
+```php
+use BEAR\ToolUse\Schema\Tool;
+
+$agent = $agentFactory
+    ->addResources(['app://self/article'])
+    ->addClientTools([
+        new Tool('update_editor_field', 'エディタUIのフィールドを更新する', [
+            'type' => 'object',
+            'properties' => [
+                'field' => ['type' => 'string', 'enum' => ['title', 'description']],
+                'value' => ['type' => 'string'],
+            ],
+            'required' => ['field', 'value'],
+        ]),
+    ])
+    ->create('あなたは編集アシスタントです。');
+```
+
+`client: true` フラグは自動的に付与されます。
+
+### 同期エージェント
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\AgentResponse;
+
+$response = $agent->run('descriptionを改善して');
+
+if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
+    foreach ($response->clientToolCalls as $call) {
+        // $call->id, $call->name, $call->input を使いクライアント側で実行
+    }
+
+    // 実行結果を渡してループを継続
+    $final = $agent->resume([ToolResult::success($call->id, ['applied' => true])]);
+}
+```
+
+### ストリーミングエージェント
+
+```php
+use BEAR\ToolUse\Runtime\AgentEvent;
+
+foreach ($agent->runStream($userMessage) as $event) {
+    if ($event->type === AgentEvent::CLIENT_TOOL_CALL) {
+        // toolName / toolId / input をクライアントに転送（例: SSE）
+    }
+}
+
+// ストリームは CLIENT_TOOL_CALL イベントの後に終了する。結果が届いたら継続:
+foreach ($agent->resumeStream([ToolResult::success($toolId, $result)]) as $event) {
+    // ...
+}
+```
+
+### 動作の流れ
+
+```text
+LLM: tool_use update_editor_field({field: "description", value: "..."})
+  ↓
+同一ターンのサーバー側ツールは通常どおりディスパッチ
+  ↓
+ラン終了: CLIENT_TOOL_CALL イベント（ストリーミング）/ STOP_CLIENT_TOOL_USE（同期）
+  ↓
+クライアントがツールを実行（UI更新、ユーザーの採用/却下 等）
+  ↓
+resume() / resumeStream() に ToolResult を渡す
+  ↓
+LLMがそのターンの全ツール結果を受けて継続
+```
+
+- クライアントツールはサーバー側で決してディスパッチされません（`Dispatcher` を完全にバイパス）。
+- サーバーツールとクライアントツールが同一ターンに混在した場合、サーバー側の結果はエージェントインスタンスに保持され、`resume()` / `resumeStream()` 時に自動でマージされます。
+- ステートレスなHTTP構成では、再開前に永続化した会話から `Agent::$messages` を再構築してください。保持中のサーバー結果はインスタンス内にあるため、新しいインスタンスには中断ターンの全ツール結果を渡す（またはクライアントの `tool_use` ブロックのみをリプレイする）必要があります。
+
 ## レスポンスフィルタリング
 
 `filter` を使用して、LLMに送信する前にレスポンスボディを削減できます。大量のデータを返すリソースでトークン効率を改善します。

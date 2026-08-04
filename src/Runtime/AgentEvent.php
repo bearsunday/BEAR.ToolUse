@@ -17,6 +17,7 @@ final readonly class AgentEvent implements JsonSerializable
     public const TOOL_RESULT = 'tool_result';
     public const COMPLETED = 'completed';
     public const CONFIRMATION_REQUIRED = 'confirmation_required';
+    public const CLIENT_TOOL_CALL = 'client_tool_call';
     public const ERROR = 'error';
 
     /** @param array<string, mixed> $data */
@@ -54,6 +55,16 @@ final readonly class AgentEvent implements JsonSerializable
             'toolId' => $toolId,
             'input' => $input,
             'message' => $message,
+        ]);
+    }
+
+    /** @param array<string, mixed> $input */
+    public static function clientToolCall(string $toolName, string $toolId, array $input): self
+    {
+        return new self(self::CLIENT_TOOL_CALL, [
+            'toolName' => $toolName,
+            'toolId' => $toolId,
+            'input' => $input,
         ]);
     }
 

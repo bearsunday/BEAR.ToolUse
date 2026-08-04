@@ -47,6 +47,33 @@ final class AgentFactory
     }
 
     /**
+     * Add client-executed tools
+     *
+     * Client tools are exposed to the LLM but never dispatched server-side.
+     * When the LLM calls one, the agent run ends and the call is handed to
+     * the consumer for execution; resume the run with the execution results.
+     *
+     * @param list<Tool> $tools
+     *
+     * @return $this
+     */
+    public function addClientTools(array $tools): self
+    {
+        foreach ($tools as $tool) {
+            $this->tools[] = $tool->client ? $tool : new Tool(
+                name: $tool->name,
+                description: $tool->description,
+                inputSchema: $tool->inputSchema,
+                confirm: $tool->confirm,
+                filter: $tool->filter,
+                client: true,
+            );
+        }
+
+        return $this;
+    }
+
+    /**
      * Create the agent
      */
     public function create(string $systemPrompt, int $maxIterations = 10): AgentInterface

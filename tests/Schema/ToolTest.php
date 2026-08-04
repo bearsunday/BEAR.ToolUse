@@ -52,6 +52,41 @@ final class ToolTest extends TestCase
         $this->assertArrayNotHasKey('confirm', $json);
     }
 
+    public function testJsonSerializeWithClient(): void
+    {
+        $tool = new Tool(
+            name: 'ui_update',
+            description: 'Update a form field on the client',
+            inputSchema: [
+                'type' => 'object',
+                'properties' => [
+                    'field' => ['type' => 'string'],
+                ],
+                'required' => ['field'],
+            ],
+            client: true,
+        );
+
+        $json = $tool->jsonSerialize();
+
+        $this->assertTrue($json['client'] ?? false);
+    }
+
+    public function testJsonSerializeWithoutClientOmitsKey(): void
+    {
+        $tool = new Tool(
+            name: 'article_get',
+            description: 'Get an article by ID',
+            inputSchema: [
+                'type' => 'object',
+                'properties' => [],
+                'required' => [],
+            ],
+        );
+
+        $this->assertArrayNotHasKey('client', $tool->jsonSerialize());
+    }
+
     public function testJsonSerializeWithConfirm(): void
     {
         $tool = new Tool(
