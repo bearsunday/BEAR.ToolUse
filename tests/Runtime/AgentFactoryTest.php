@@ -87,6 +87,62 @@ final class AgentFactoryTest extends TestCase
         $this->assertSame($flagged, $tools[1]);
     }
 
+    public function testAddClientToolsRejectsConfirmableTool(): void
+    {
+        $confirmable = new Tool('ui_update', 'Update a form field on the client', [
+            'type' => 'object',
+            'properties' => ['field' => ['type' => 'string']],
+            'required' => ['field'],
+        ], confirm: true);
+
+        $this->expectException(ConfirmableClientToolException::class);
+        $this->expectExceptionMessage('ui_update');
+
+        $this->factory->addClientTools([$confirmable]);
+    }
+
+    public function testAddClientToolsRejectsNameRegisteredByResources(): void
+    {
+        $this->factory->addResources(['app://self/article']);
+        $duplicate = new Tool('article_get', 'Client tool shadowing a server tool', [
+            'type' => 'object',
+            'properties' => [],
+            'required' => [],
+        ]);
+
+        $this->expectException(DuplicateToolNameException::class);
+        $this->expectExceptionMessage('article_get');
+
+        $this->factory->addClientTools([$duplicate]);
+    }
+
+    public function testAddClientToolsRejectsDuplicateWithinBatch(): void
+    {
+        $tool = static fn () => new Tool('ui_update', 'Update a form field on the client', [
+            'type' => 'object',
+            'properties' => [],
+            'required' => [],
+        ]);
+
+        $this->expectException(DuplicateToolNameException::class);
+
+        $this->factory->addClientTools([$tool(), $tool()]);
+    }
+
+    public function testAddClientToolsRejectsDuplicateAcrossCalls(): void
+    {
+        $tool = static fn () => new Tool('ui_update', 'Update a form field on the client', [
+            'type' => 'object',
+            'properties' => [],
+            'required' => [],
+        ]);
+        $this->factory->addClientTools([$tool()]);
+
+        $this->expectException(DuplicateToolNameException::class);
+
+        $this->factory->addClientTools([$tool()]);
+    }
+
     public function testFluentInterface(): void
     {
         $result = $this->factory

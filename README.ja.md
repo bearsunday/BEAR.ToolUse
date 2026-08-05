@@ -355,7 +355,7 @@ $agent = $agentFactory
     ->create('あなたは編集アシスタントです。');
 ```
 
-`client: true` フラグは自動的に付与されます。
+`client: true` フラグは自動的に付与されます。クライアントツールに `confirm: true` は指定できません（確認はクライアント側の責務です — ユーザーは既にループに介在しています）。また、ツール名はリソース・クライアントツールを通して一意である必要があります。違反は登録時に例外になります。
 
 ### 同期エージェント
 
@@ -366,28 +366,34 @@ use BEAR\ToolUse\Runtime\AgentResponse;
 $response = $agent->run('descriptionを改善して');
 
 if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
+    $results = [];
     foreach ($response->clientToolCalls as $call) {
         // $call->id, $call->name, $call->input を使いクライアント側で実行
+        $results[] = ToolResult::success($call->id, ['applied' => true]);
     }
 
-    // 実行結果を渡してループを継続
-    $final = $agent->resume([ToolResult::success($call->id, ['applied' => true])]);
+    // 保留中の呼び出しごとに1件の結果を渡してループを継続
+    $final = $agent->resume($results);
 }
 ```
 
 ### ストリーミングエージェント
 
 ```php
+use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Runtime\AgentEvent;
 
+$results = [];
 foreach ($agent->runStream($userMessage) as $event) {
     if ($event->type === AgentEvent::CLIENT_TOOL_CALL) {
         // toolName / toolId / input をクライアントに転送（例: SSE）
+        $results[] = ToolResult::success($event->data['toolId'], ['applied' => true]);
     }
 }
 
-// ストリームは CLIENT_TOOL_CALL イベントの後に終了する。結果が届いたら継続:
-foreach ($agent->resumeStream([ToolResult::success($toolId, $result)]) as $event) {
+// ストリームは CLIENT_TOOL_CALL イベントの後に終了する。
+// 受け取った呼び出しごとに1件の結果を渡して継続:
+foreach ($agent->resumeStream($results) as $event) {
     // ...
 }
 ```

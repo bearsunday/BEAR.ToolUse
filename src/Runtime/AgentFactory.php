@@ -11,6 +11,8 @@ use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
 use BEAR\ToolUse\Schema\Tool;
 use BEAR\ToolUse\Schema\ToolCollectorInterface;
 
+use function sprintf;
+
 /**
  * Factory for creating Agent instances
  */
@@ -53,18 +55,45 @@ final class AgentFactory
      * When the LLM calls one, the agent run ends and the call is handed to
      * the consumer for execution; resume the run with the execution results.
      *
+     * Client tools must not set `confirm: true`: confirmation is the client's
+     * responsibility (the user is already in the loop on the client side).
+     * Tool names must be unique across all registered tools; a client tool
+     * sharing a name with a server tool would misroute the server tool past
+     * the dispatcher.
+     *
      * @param list<Tool> $tools
      *
      * @return $this
+     *
+     * @throws ConfirmableClientToolException When a client tool sets confirm: true.
+     * @throws DuplicateToolNameException When a tool name is already registered.
      */
     public function addClientTools(array $tools): self
     {
+        $registeredNames = [];
+        foreach ($this->tools as $registeredTool) {
+            $registeredNames[$registeredTool->name] = true;
+        }
+
         foreach ($tools as $tool) {
+            if ($tool->confirm) {
+                throw new ConfirmableClientToolException(sprintf(
+                    'Client tool "%s" must not set confirm: true; confirmation is a client-side concern',
+                    $tool->name,
+                ));
+            }
+
+            if (isset($registeredNames[$tool->name])) {
+                throw new DuplicateToolNameException(sprintf('Tool "%s" is already registered', $tool->name));
+            }
+
+            $registeredNames[$tool->name] = true;
+
             $this->tools[] = $tool->client ? $tool : new Tool(
                 name: $tool->name,
                 description: $tool->description,
                 inputSchema: $tool->inputSchema,
-                confirm: $tool->confirm,
+                confirm: false,
                 filter: $tool->filter,
                 client: true,
             );

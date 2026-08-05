@@ -355,7 +355,7 @@ $agent = $agentFactory
     ->create('You are an editorial assistant.');
 ```
 
-The `client: true` flag is enforced automatically.
+The `client: true` flag is enforced automatically. Client tools must not set `confirm: true` (confirmation is the client's responsibility — the user is already in the loop), and tool names must be unique across resources and client tools; violations throw at registration time.
 
 ### Synchronous Agent
 
@@ -366,28 +366,34 @@ use BEAR\ToolUse\Runtime\AgentResponse;
 $response = $agent->run('Improve the description');
 
 if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
+    $results = [];
     foreach ($response->clientToolCalls as $call) {
         // Execute on the client using $call->id, $call->name, $call->input
+        $results[] = ToolResult::success($call->id, ['applied' => true]);
     }
 
-    // Feed the execution results back and continue the loop
-    $final = $agent->resume([ToolResult::success($call->id, ['applied' => true])]);
+    // Feed one result per pending call back and continue the loop
+    $final = $agent->resume($results);
 }
 ```
 
 ### Streaming Agent
 
 ```php
+use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Runtime\AgentEvent;
 
+$results = [];
 foreach ($agent->runStream($userMessage) as $event) {
     if ($event->type === AgentEvent::CLIENT_TOOL_CALL) {
         // Forward toolName / toolId / input to the client (e.g. over SSE)
+        $results[] = ToolResult::success($event->data['toolId'], ['applied' => true]);
     }
 }
 
-// The stream ends after CLIENT_TOOL_CALL events. Continue once results arrive:
-foreach ($agent->resumeStream([ToolResult::success($toolId, $result)]) as $event) {
+// The stream ends after CLIENT_TOOL_CALL events.
+// Continue with one result per received call once they arrive:
+foreach ($agent->resumeStream($results) as $event) {
     // ...
 }
 ```
