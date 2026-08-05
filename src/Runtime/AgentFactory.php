@@ -21,6 +21,9 @@ final class AgentFactory
     /** @var list<Tool> */
     private array $tools = [];
 
+    /** @var array<string, true> */
+    private array $clientToolNames = [];
+
     public function __construct(
         private readonly LlmClientInterface $client,
         private readonly DispatcherInterface $dispatcher,
@@ -37,11 +40,21 @@ final class AgentFactory
      * @param list<string> $uris List of full resource URIs (e.g., ["app://self/user", "app://self/article"])
      *
      * @return $this
+     *
+     * @throws DuplicateToolNameException When a collected tool name is already registered as a client tool.
      */
     public function addResources(array $uris): self
     {
         $tools = $this->collector->collect($uris);
         foreach ($tools as $tool) {
+            // A server tool named like a client tool would be classified as
+            // client by ToolList and bypass the dispatcher entirely
+            if (isset($this->clientToolNames[$tool->name])) {
+                throw new DuplicateToolNameException(
+                    sprintf('Tool "%s" is already registered as a client tool', $tool->name),
+                );
+            }
+
             $this->tools[] = $tool;
         }
 
@@ -87,7 +100,8 @@ final class AgentFactory
                 throw new DuplicateToolNameException(sprintf('Tool "%s" is already registered', $tool->name));
             }
 
-            $registeredNames[$tool->name] = true;
+            $registeredNames[$tool->name]      = true;
+            $this->clientToolNames[$tool->name] = true;
 
             $this->tools[] = $tool->client ? $tool : new Tool(
                 name: $tool->name,

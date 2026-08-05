@@ -25,6 +25,7 @@ use function json_encode;
 
 #[CoversClass(StreamingAgent::class)]
 #[CoversClass(AgentEvent::class)]
+#[CoversClass(ResumeValidator::class)]
 #[CoversClass(ToolList::class)]
 final class StreamingAgentClientToolTest extends TestCase
 {
@@ -173,7 +174,7 @@ final class StreamingAgentClientToolTest extends TestCase
         $this->assertSame('call_client', $toolResultMessage->content[1]['tool_use_id']);
     }
 
-    public function testResetClearsPendingToolResults(): void
+    public function testResumeStreamAfterResetIsRejected(): void
     {
         $serverInput = json_encode(['id' => 123]);
         $clientInput = json_encode(['field' => 'title', 'value' => 'T']);
@@ -194,19 +195,56 @@ final class StreamingAgentClientToolTest extends TestCase
 
         $this->assertSame([], $this->agent->messages);
 
-        // Held server results are gone: resumeStream() only carries the given results
+        // No client tool call is awaiting results after reset(); the
+        // validation throws eagerly, before any stream is started
+        $this->expectException(InvalidResumeException::class);
+
+        $this->agent->resumeStream([ToolResult::success('call_client', 'applied')]);
+    }
+
+    public function testResumeStreamWithMismatchedResultIsRejected(): void
+    {
+        $toolInput = json_encode(['field' => 'title', 'value' => 'New']);
         $this->llmClient->setEventSequences([
             [
-                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'OK']),
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        iterator_to_array($this->agent->runStream('Update the title'));
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('missing: [call_1], unexpected: [call_other]');
+
+        $this->agent->resumeStream([ToolResult::success('call_other', 'applied')]);
+    }
+
+    public function testStatelessResumeStreamOnFreshAgent(): void
+    {
+        // A consumer resuming across HTTP requests reconstructs the
+        // conversation on a fresh agent instance and resumes from there
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'The title has been updated.']),
                 new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
                 new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
             ],
         ]);
-        iterator_to_array($this->agent->resumeStream([ToolResult::success('call_client', 'applied')]));
 
-        $messages = $this->llmClient->calls[0]['messages'];
-        $toolResultMessage = $messages[count($messages) - 1];
-        $this->assertCount(1, $toolResultMessage->content);
-        $this->assertSame('call_client', $toolResultMessage->content[0]['tool_use_id']);
+        $this->agent->messages[] = Message::user('Update the title');
+        $this->agent->messages[] = Message::assistant([
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'ui_update', 'input' => ['field' => 'title', 'value' => 'New']],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->resumeStream([ToolResult::success('call_1', ['applied' => true])]));
+
+        /** @var AgentEvent $lastEvent */
+        $lastEvent = end($events);
+        $this->assertSame(AgentEvent::COMPLETED, $lastEvent->type);
+        $this->assertSame('The title has been updated.', $lastEvent->data['fullText']);
     }
 }

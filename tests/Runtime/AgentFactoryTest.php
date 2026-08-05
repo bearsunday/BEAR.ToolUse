@@ -129,6 +129,25 @@ final class AgentFactoryTest extends TestCase
         $this->factory->addClientTools([$tool(), $tool()]);
     }
 
+    public function testAddResourcesRejectsNameRegisteredAsClientTool(): void
+    {
+        $this->factory->addClientTools([
+            new Tool('article_get', 'Client tool shadowing a server tool', [
+                'type' => 'object',
+                'properties' => [],
+                'required' => [],
+            ]),
+        ]);
+
+        // Reverse order of testAddClientToolsRejectsNameRegisteredByResources:
+        // without this guard the server tool would be classified as client
+        // by name and never reach the dispatcher
+        $this->expectException(DuplicateToolNameException::class);
+        $this->expectExceptionMessage('article_get');
+
+        $this->factory->addResources(['app://self/article']);
+    }
+
     public function testAddClientToolsRejectsDuplicateAcrossCalls(): void
     {
         $tool = static fn () => new Tool('ui_update', 'Update a form field on the client', [

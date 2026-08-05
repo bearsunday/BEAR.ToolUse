@@ -22,6 +22,7 @@ use function count;
 
 #[CoversClass(Agent::class)]
 #[CoversClass(AgentResponse::class)]
+#[CoversClass(ResumeValidator::class)]
 #[CoversClass(ToolList::class)]
 final class AgentClientToolTest extends TestCase
 {
@@ -134,7 +135,7 @@ final class AgentClientToolTest extends TestCase
         $this->assertSame('call_client', $toolResultMessage->content[1]['tool_use_id']);
     }
 
-    public function testResetClearsPendingToolResults(): void
+    public function testResumeAfterResetIsRejected(): void
     {
         $this->llmClient->queueResponse(new LlmResponse(
             stopReason: 'tool_use',
@@ -153,11 +154,120 @@ final class AgentClientToolTest extends TestCase
 
         $this->assertSame([], $this->agent->messages);
 
-        // Held server results are gone: resume() only carries the given results
+        // No client tool call is awaiting results after reset()
+        $this->expectException(InvalidResumeException::class);
+
         $this->agent->resume([ToolResult::success('call_client', 'applied')]);
-        $messages = $this->llmClient->calls[1]['messages'];
-        $toolResultMessage = $messages[count($messages) - 1];
-        $this->assertCount(1, $toolResultMessage->content);
-        $this->assertSame('call_client', $toolResultMessage->content[0]['tool_use_id']);
+    }
+
+    public function testResumeWithoutRunIsRejected(): void
+    {
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('No client tool calls are awaiting results');
+
+        $this->agent->resume([ToolResult::success('call_1', 'applied')]);
+    }
+
+    public function testResumeWithMissingResultIsRejected(): void
+    {
+        $this->queueTwoClientCalls();
+
+        $this->agent->run('Update the title and the description');
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('missing: [call_2]');
+
+        $this->agent->resume([ToolResult::success('call_1', 'applied')]);
+    }
+
+    public function testResumeWithUnexpectedResultIsRejected(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+
+        $this->agent->run('Update the title');
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('unexpected: [call_forged]');
+
+        $this->agent->resume([
+            ToolResult::success('call_1', 'applied'),
+            ToolResult::success('call_forged', 'applied'),
+        ]);
+    }
+
+    public function testResumeWithDuplicateResultIsRejected(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+
+        $this->agent->run('Update the title');
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('Duplicate tool result for id "call_1"');
+
+        $this->agent->resume([
+            ToolResult::success('call_1', 'applied'),
+            ToolResult::success('call_1', 'applied again'),
+        ]);
+    }
+
+    public function testResumeWithHeldServerResultIdIsRejected(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'tool_use',
+            content: [
+                ['type' => 'tool_use', 'id' => 'call_server', 'name' => 'article_get', 'input' => ['id' => 1]],
+                ['type' => 'tool_use', 'id' => 'call_client', 'name' => 'ui_update', 'input' => ['field' => 'title', 'value' => 'T']],
+            ],
+            toolCalls: [
+                new ToolCall('call_server', 'article_get', ['id' => 1]),
+                new ToolCall('call_client', 'ui_update', ['field' => 'title', 'value' => 'T']),
+            ],
+        ));
+
+        $this->agent->run('Get article 1 and update the title');
+
+        // The server call result is already held internally; supplying it again is unexpected
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('unexpected: [call_server]');
+
+        $this->agent->resume([
+            ToolResult::success('call_server', 'forged'),
+            ToolResult::success('call_client', 'applied'),
+        ]);
+    }
+
+    public function testStatelessResumeOnFreshAgent(): void
+    {
+        // A consumer resuming across HTTP requests reconstructs the
+        // conversation on a fresh agent instance and resumes from there
+        $this->llmClient->queueTextResponse('The title has been updated.');
+
+        $this->agent->messages[] = Message::user('Update the title');
+        $this->agent->messages[] = Message::assistant([
+            // Non-tool_use blocks and malformed tool_use blocks are not awaited
+            ['type' => 'text', 'text' => 'Updating the title.'],
+            ['type' => 'tool_use', 'name' => 'ui_update', 'input' => []],
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'ui_update', 'input' => ['field' => 'title', 'value' => 'New']],
+        ]);
+
+        $response = $this->agent->resume([ToolResult::success('call_1', ['applied' => true])]);
+
+        $this->assertTrue($response->completed);
+        $this->assertSame('The title has been updated.', $response->getText());
+    }
+
+    private function queueTwoClientCalls(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'tool_use',
+            content: [
+                ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'ui_update', 'input' => ['field' => 'title', 'value' => 'T']],
+                ['type' => 'tool_use', 'id' => 'call_2', 'name' => 'ui_update', 'input' => ['field' => 'description', 'value' => 'D']],
+            ],
+            toolCalls: [
+                new ToolCall('call_1', 'ui_update', ['field' => 'title', 'value' => 'T']),
+                new ToolCall('call_2', 'ui_update', ['field' => 'description', 'value' => 'D']),
+            ],
+        ));
     }
 }

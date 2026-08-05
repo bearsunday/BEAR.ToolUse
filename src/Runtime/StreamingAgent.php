@@ -61,17 +61,24 @@ final class StreamingAgent implements StreamingAgentInterface
      *
      * Call after runStream() ended with CLIENT_TOOL_CALL events. Server-side
      * results from the interrupted turn are merged in automatically.
+     * Validation runs eagerly at call time (not at first iteration) so the
+     * consumer can reject an invalid resume before starting a response stream.
      *
      * @param list<ToolResult> $toolResults
      *
      * @return Generator<int, AgentEvent, mixed, void>
+     *
+     * @throws InvalidResumeException When no client tool calls are awaiting results,
+     * or the supplied result IDs do not match the awaited calls exactly once each.
      */
     public function resumeStream(array $toolResults): Generator
     {
+        ResumeValidator::validate($this->messages, $this->pendingToolResults, $toolResults);
+
         $this->messages[] = Message::toolResults([...$this->pendingToolResults, ...$toolResults]);
         $this->pendingToolResults = [];
 
-        yield from $this->loop();
+        return $this->loop();
     }
 
     /** @return Generator<int, AgentEvent, mixed, void> */
