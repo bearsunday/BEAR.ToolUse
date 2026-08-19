@@ -17,11 +17,17 @@ use function sprintf;
  * Validates that a resume call matches the client tool calls awaiting results
  *
  * The expected result IDs are derived from the conversation itself: the
- * tool_use blocks of the trailing assistant message, minus the server-side
- * results already held for the interrupted turn. Deriving them from messages
- * rather than from instance state keeps stateless resumption possible — a
- * consumer may reconstruct the conversation on a fresh agent instance across
- * HTTP requests and still resume.
+ * client tool_use blocks of the trailing assistant message. Deriving them
+ * from messages rather than from instance state keeps stateless resumption
+ * possible — a consumer may reconstruct the conversation on a fresh agent
+ * instance across HTTP requests and still resume.
+ *
+ * Server tool results are never accepted from resume input: they are
+ * computed server-side and held in the agent instance for the interrupted
+ * turn. A trailing assistant message with server tool_use blocks that have
+ * no held results is rejected — when resuming a mixed turn statelessly,
+ * rebuild the trailing assistant message with the client tool_use blocks
+ * only.
  *
  * This is a fail-fast correctness check, not a trust boundary: a consumer
  * that accepts conversation history from a client must authenticate the
@@ -36,13 +42,23 @@ final readonly class ResumeValidator
      * @param list<ToolResult> $toolResults Client execution results being supplied
      *
      * @throws InvalidResumeException When no client tool calls are awaiting results,
-     * or the supplied result IDs do not match the awaited calls exactly once each.
+     * a server call of the interrupted turn lacks its held result, or the supplied
+     * result IDs do not match the awaited client calls exactly once each.
      */
-    public static function validate(array $messages, array $heldResults, array $toolResults): void
+    public static function validate(array $messages, ToolList $toolList, array $heldResults, array $toolResults): void
     {
-        $expected = self::expectedIds($messages, $heldResults);
+        [$expected, $unresolvedServer] = self::awaitedIds($messages, $toolList, $heldResults);
         if ($expected === []) {
             throw new InvalidResumeException('No client tool calls are awaiting results');
+        }
+
+        if ($unresolvedServer !== []) {
+            throw new InvalidResumeException(sprintf(
+                'Server tool calls [%s] have no held results. Server results cannot be supplied on resume;'
+                . ' when resuming statelessly, rebuild the trailing assistant message with the client'
+                . ' tool_use blocks only',
+                implode(', ', array_keys($unresolvedServer)),
+            ));
         }
 
         $supplied = [];
@@ -66,19 +82,22 @@ final readonly class ResumeValidator
     }
 
     /**
+     * Partition the trailing assistant message's tool_use IDs
+     *
      * @param list<Message>    $messages
      * @param list<ToolResult> $heldResults
      *
-     * @return array<string, true>
+     * @return array{array<string, true>, array<string, true>} Awaited client IDs and server IDs without a held result
      */
-    private static function expectedIds(array $messages, array $heldResults): array
+    private static function awaitedIds(array $messages, ToolList $toolList, array $heldResults): array
     {
         $lastMessage = end($messages);
         if (! $lastMessage instanceof Message || $lastMessage->role !== 'assistant') {
-            return [];
+            return [[], []];
         }
 
-        $expected = [];
+        $client = [];
+        $server = [];
         foreach ($lastMessage->content as $block) {
             if (($block['type'] ?? null) !== 'tool_use') {
                 continue;
@@ -89,13 +108,26 @@ final readonly class ResumeValidator
                 continue;
             }
 
-            $expected[$id] = true;
+            if (self::isClientBlock($block, $toolList)) {
+                $client[$id] = true;
+
+                continue;
+            }
+
+            // A block without a client tool name is a server call
+            $server[$id] = true;
         }
 
         foreach ($heldResults as $held) {
-            unset($expected[$held->toolUseId]);
+            unset($server[$held->toolUseId]);
         }
 
-        return $expected;
+        return [$client, $server];
+    }
+
+    /** @param array<string, mixed> $block */
+    private static function isClientBlock(array $block, ToolList $toolList): bool
+    {
+        return isset($block['name']) && is_string($block['name']) && $toolList->isClient($block['name']);
     }
 }

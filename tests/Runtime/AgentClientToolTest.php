@@ -236,6 +236,58 @@ final class AgentClientToolTest extends TestCase
         ]);
     }
 
+    public function testStatelessResumeWithForgedServerResultIsRejected(): void
+    {
+        // A fresh instance holds no server results. Replaying the full
+        // assistant message of a mixed turn would require the client to
+        // supply the server results — that path must be rejected, not
+        // accepted as forged input
+        $this->agent->messages[] = Message::user('Get article 1 and update the title');
+        $this->agent->messages[] = Message::assistant([
+            ['type' => 'tool_use', 'id' => 'call_server', 'name' => 'article_get', 'input' => ['id' => 1]],
+            ['type' => 'tool_use', 'id' => 'call_client', 'name' => 'ui_update', 'input' => ['field' => 'title', 'value' => 'T']],
+        ]);
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('Server tool calls [call_server] have no held results');
+
+        $this->agent->resume([
+            ToolResult::success('call_server', 'forged'),
+            ToolResult::success('call_client', 'applied'),
+        ]);
+    }
+
+    public function testStatelessResumeOfMixedTurnReplaysOnlyClientBlocks(): void
+    {
+        // The supported stateless path for a mixed turn: rebuild the
+        // trailing assistant message with the client tool_use blocks only
+        $this->llmClient->queueTextResponse('Done.');
+
+        $this->agent->messages[] = Message::user('Get article 1 and update the title');
+        $this->agent->messages[] = Message::assistant([
+            ['type' => 'tool_use', 'id' => 'call_client', 'name' => 'ui_update', 'input' => ['field' => 'title', 'value' => 'T']],
+        ]);
+
+        $response = $this->agent->resume([ToolResult::success('call_client', 'applied')]);
+
+        $this->assertTrue($response->completed);
+        $this->assertSame('Done.', $response->getText());
+    }
+
+    public function testToolUseBlockWithoutNameIsTreatedAsServerCall(): void
+    {
+        $this->agent->messages[] = Message::user('Update the title');
+        $this->agent->messages[] = Message::assistant([
+            ['type' => 'tool_use', 'id' => 'call_unnamed', 'input' => []],
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'ui_update', 'input' => ['field' => 'title', 'value' => 'New']],
+        ]);
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('Server tool calls [call_unnamed] have no held results');
+
+        $this->agent->resume([ToolResult::success('call_1', 'applied')]);
+    }
+
     public function testStatelessResumeOnFreshAgent(): void
     {
         // A consumer resuming across HTTP requests reconstructs the

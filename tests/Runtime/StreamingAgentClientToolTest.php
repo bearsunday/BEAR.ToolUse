@@ -13,6 +13,7 @@ use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
+use JsonException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
@@ -220,6 +221,24 @@ final class StreamingAgentClientToolTest extends TestCase
         $this->expectExceptionMessage('missing: [call_1], unexpected: [call_other]');
 
         $this->agent->resumeStream([ToolResult::success('call_other', 'applied')]);
+    }
+
+    public function testMalformedClientToolInputThrows(): void
+    {
+        // Malformed tool arguments must not silently degrade to an empty
+        // input and reach the client as an executable call
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"field": "title", ']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        $this->expectException(JsonException::class);
+
+        iterator_to_array($this->agent->runStream('Update the title'));
     }
 
     public function testStatelessResumeStreamOnFreshAgent(): void

@@ -171,6 +171,8 @@ Tools executed by the client (browser UI, CLI) instead of being dispatched to a 
 - `reset()` clears `$pendingToolResults` along with `$messages`
 - `Schema\Tool::$client` serializes to JSON as `client: true` only when true (same convention as `confirm`)
 - `resume()`/`resumeStream()` are concrete-class methods, not part of `AgentInterface`/`StreamingAgentInterface` (BC)
+- `ResumeValidator` accepts only client tool result IDs (classified via `ToolList::isClient()` from the trailing assistant message's `tool_use` block names); server results must already be held in `$pendingToolResults` — supplying them on resume is rejected. Stateless resume of a mixed turn replays the trailing assistant message with the client `tool_use` blocks only
+- Malformed client tool input JSON throws `JsonException` (`JSON_THROW_ON_ERROR`) instead of degrading to an empty array — the pre-existing lenient decodes in `dispatchPendingToolCalls()` / `StreamContentAccumulator` are out of this scope
 
 ## Response Filtering
 

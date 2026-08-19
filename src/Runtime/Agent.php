@@ -63,11 +63,12 @@ final class Agent implements AgentInterface
      * @param list<ToolResult> $toolResults
      *
      * @throws InvalidResumeException When no client tool calls are awaiting results,
-     * or the supplied result IDs do not match the awaited calls exactly once each.
+     * a server call of the interrupted turn lacks its held result, or the supplied
+     * result IDs do not match the awaited client calls exactly once each.
      */
     public function resume(array $toolResults): AgentResponse
     {
-        ResumeValidator::validate($this->messages, $this->pendingToolResults, $toolResults);
+        ResumeValidator::validate($this->messages, $this->toolList, $this->pendingToolResults, $toolResults);
 
         $this->messages[]         = Message::toolResults([...$this->pendingToolResults, ...$toolResults]);
         $this->pendingToolResults = [];

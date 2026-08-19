@@ -355,7 +355,7 @@ $agent = $agentFactory
     ->create('You are an editorial assistant.');
 ```
 
-The `client: true` flag is enforced automatically. Client tools must not set `confirm: true` (confirmation is the client's responsibility — the user is already in the loop), and tool names must be unique across resources and client tools; violations throw at registration time.
+The `client: true` flag is enforced automatically. Client tools must not set `confirm: true` — the library does not enforce confirmation for client tools; when an operation needs approval, implement it explicitly on the client (see Security Considerations). Tool names must be unique across resources and client tools; violations throw at registration time.
 
 ### Synchronous Agent
 
@@ -416,7 +416,7 @@ LLM continues with all tool results of the turn
 
 ### Resume Validation
 
-`resume()` / `resumeStream()` throw `InvalidResumeException` unless the trailing assistant message contains client tool calls awaiting results and the supplied result IDs match those calls exactly once each — no missing, extra, or duplicate IDs, and no resumption after `reset()` or a completed run. The expected IDs are derived from the conversation itself, so stateless resumption — reconstructing `$agent->messages` on a fresh instance across HTTP requests — keeps working.
+`resume()` / `resumeStream()` throw `InvalidResumeException` unless the trailing assistant message contains client tool calls awaiting results and the supplied result IDs match those **client** calls exactly once each — no missing, extra, or duplicate IDs, and no resumption after `reset()` or a completed run. Server tool results are never accepted from resume input: they are computed server-side and held in the agent instance, so a resume that would need a server result supplied from outside is rejected. The expected IDs are derived from the conversation itself, so stateless resumption — reconstructing `$agent->messages` on a fresh instance across HTTP requests — keeps working; for a turn that mixed server and client calls, rebuild the trailing assistant message with the client `tool_use` blocks only.
 
 ### Security Considerations
 
@@ -424,13 +424,13 @@ Client tools execute LLM-generated, untrusted input on the client. When exposing
 
 - The input schema describes the tool to the LLM; it is not validation. Re-validate types, value ranges, and target IDs on the client before applying anything.
 - Do not expose general-purpose capabilities (arbitrary URL navigation, arbitrary `fetch`, HTML injection, JS evaluation, clipboard or whole-DOM reads). Insert text via `textContent`; allow-list URL schemes and hosts.
-- When resuming across HTTP requests, bind the resume endpoint to an authenticated user and conversation session — e.g. a single-use opaque continuation token with server-held state. Resume validation above is a fail-fast correctness check, not a trust boundary: conversation history accepted from a client must not be treated as trusted.
+- When resuming across HTTP requests, bind the resume endpoint to an authenticated user and conversation session — e.g. a single-use opaque continuation token with server-held state. Resume validation above is a fail-fast correctness check, not a trust boundary: conversation history accepted from a client must not be treated as trusted. Tool call IDs appear in the conversation and are visible to the LLM and the client; treat them as public values, never as authorization tokens.
 - Tool results are untrusted data to the LLM and can steer subsequent server tool calls. Return minimal structured results; never secrets, cookies, tokens, or whole-page content.
 - For state-changing UI operations, show the proposed change and get the user's approval on the client. This is why `confirm: true` is rejected for client tools: confirmation is the client's responsibility, not the server's.
 
 - Client tools are never dispatched server-side; the `Dispatcher` is bypassed entirely.
 - When a turn mixes server and client tool calls, server results are held in the agent instance and merged automatically on `resume()` / `resumeStream()`.
-- In a stateless HTTP setup, rebuild `Agent::$messages` from your persisted conversation before resuming. Held server results live in the agent instance, so a fresh instance must be given every tool result of the interrupted turn (or replay only the client `tool_use` block).
+- In a stateless HTTP setup, rebuild `Agent::$messages` from your persisted conversation before resuming. Held server results live in the agent instance and cannot be re-supplied on resume, so for a mixed turn rebuild the trailing assistant message with the client `tool_use` blocks only.
 
 ## Response Filtering
 

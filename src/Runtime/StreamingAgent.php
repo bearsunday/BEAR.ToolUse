@@ -11,10 +11,13 @@ use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
 use BEAR\ToolUse\Schema\Tool;
 use Generator;
+use JsonException;
 use Override;
 use Throwable;
 
 use function json_decode;
+
+use const JSON_THROW_ON_ERROR;
 
 /**
  * Streaming agent runtime
@@ -69,11 +72,12 @@ final class StreamingAgent implements StreamingAgentInterface
      * @return Generator<int, AgentEvent, mixed, void>
      *
      * @throws InvalidResumeException When no client tool calls are awaiting results,
-     * or the supplied result IDs do not match the awaited calls exactly once each.
+     * a server call of the interrupted turn lacks its held result, or the supplied
+     * result IDs do not match the awaited client calls exactly once each.
      */
     public function resumeStream(array $toolResults): Generator
     {
-        ResumeValidator::validate($this->messages, $this->pendingToolResults, $toolResults);
+        ResumeValidator::validate($this->messages, $this->toolList, $this->pendingToolResults, $toolResults);
 
         $this->messages[] = Message::toolResults([...$this->pendingToolResults, ...$toolResults]);
         $this->pendingToolResults = [];
@@ -157,6 +161,9 @@ final class StreamingAgent implements StreamingAgentInterface
      * Dispatch server tools, then hand remaining client tool calls to the consumer
      *
      * @return Generator<int, AgentEvent, mixed, bool> True when the run ends awaiting client execution
+     *
+     * @throws JsonException When the LLM produced malformed JSON for a client tool call —
+     * the input would otherwise silently degrade to an empty array and be executed as such.
      */
     private function processToolUseTurn(StreamIterationState $state): Generator
     {
@@ -183,7 +190,7 @@ final class StreamingAgent implements StreamingAgentInterface
             $this->pendingToolResults = $toolResults;
             foreach ($clientCalls as $pending) {
                 /** @var array<string, mixed> $input */
-                $input = (array) json_decode($pending->inputJson, true);
+                $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
 
                 yield AgentEvent::clientToolCall($pending->name, $pending->id, $input);
             }
