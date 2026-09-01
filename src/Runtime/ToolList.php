@@ -16,11 +16,19 @@ final readonly class ToolList
     /** @var array<string, bool> */
     private array $confirmable;
 
+    /** @var array<string, bool> */
+    private array $client;
+
     /** @param list<Tool> $tools */
     public function __construct(array $tools)
     {
         $confirmable = [];
+        $client      = [];
         foreach ($tools as $tool) {
+            if ($tool->client) {
+                $client[$tool->name] = true;
+            }
+
             if (! $tool->confirm) {
                 continue;
             }
@@ -29,10 +37,16 @@ final readonly class ToolList
         }
 
         $this->confirmable = $confirmable;
+        $this->client      = $client;
     }
 
     public function isConfirmable(string $name): bool
     {
         return array_key_exists($name, $this->confirmable);
+    }
+
+    public function isClient(string $name): bool
+    {
+        return array_key_exists($name, $this->client);
     }
 }

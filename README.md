@@ -327,6 +327,111 @@ StreamingAgent resumes: tool executed or cancelled
 
 If `send()` is not called (e.g. `iterator_to_array()`), the tool is **denied by default** (safe default).
 
+## Client Tools
+
+Expose tools that are executed by the client (browser UI, CLI, edge app) instead of being dispatched to a resource. When the LLM calls a client tool, the run ends with the pending calls handed to the consumer; execute them on the client, then resume the conversation with the results.
+
+This enables frontend tool calling: the LLM can propose UI updates (e.g. fill a form field) that the client applies — with the user in the loop — and report back.
+
+### Register Client Tools
+
+Client tools are plain `Tool` definitions, not resources. Register them with `addClientTools()`:
+
+```php
+use BEAR\ToolUse\Schema\Tool;
+
+$agent = $agentFactory
+    ->addResources(['app://self/article'])
+    ->addClientTools([
+        new Tool('update_editor_field', 'Update a field in the editor UI', [
+            'type' => 'object',
+            'properties' => [
+                'field' => ['type' => 'string', 'enum' => ['title', 'description']],
+                'value' => ['type' => 'string'],
+            ],
+            'required' => ['field', 'value'],
+        ]),
+    ])
+    ->create('You are an editorial assistant.');
+```
+
+The `client: true` flag is enforced automatically. Client tools must not set `confirm: true` — the library does not enforce confirmation for client tools; when an operation needs approval, implement it explicitly on the client (see Security Considerations). Tool names must be unique across resources and client tools; violations throw at registration time.
+
+### Synchronous Agent
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\AgentResponse;
+
+$response = $agent->run('Improve the description');
+
+if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
+    $results = [];
+    foreach ($response->clientToolCalls as $call) {
+        // Execute on the client using $call->id, $call->name, $call->input
+        $results[] = ToolResult::success($call->id, ['applied' => true]);
+    }
+
+    // Feed one result per pending call back and continue the loop
+    $final = $agent->resume($results);
+}
+```
+
+### Streaming Agent
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\AgentEvent;
+
+$results = [];
+foreach ($agent->runStream($userMessage) as $event) {
+    if ($event->type === AgentEvent::CLIENT_TOOL_CALL) {
+        // Forward toolName / toolId / input to the client (e.g. over SSE)
+        $results[] = ToolResult::success($event->data['toolId'], ['applied' => true]);
+    }
+}
+
+// The stream ends after CLIENT_TOOL_CALL events.
+// Continue with one result per received call once they arrive:
+foreach ($agent->resumeStream($results) as $event) {
+    // ...
+}
+```
+
+### How It Works
+
+```text
+LLM: tool_use update_editor_field({field: "description", value: "..."})
+  ↓
+Server-side tools in the same turn are dispatched as usual
+  ↓
+Run ends: CLIENT_TOOL_CALL events (streaming) / STOP_CLIENT_TOOL_USE (sync)
+  ↓
+Client executes the tool (UI update, user accept/reject, ...)
+  ↓
+resume() / resumeStream() with the ToolResults
+  ↓
+LLM continues with all tool results of the turn
+```
+
+### Resume Validation
+
+`resume()` / `resumeStream()` throw `InvalidResumeException` unless the trailing assistant message contains client tool calls awaiting results and the supplied result IDs match those **client** calls exactly once each — no missing, extra, or duplicate IDs, and no resumption after `reset()` or a completed run. Server tool results are never accepted from resume input: they are computed server-side and held in the agent instance, so a resume that would need a server result supplied from outside is rejected. The expected IDs are derived from the conversation itself, so stateless resumption — reconstructing `$agent->messages` on a fresh instance across HTTP requests — keeps working; for a turn that mixed server and client calls, rebuild the trailing assistant message with the client `tool_use` blocks only.
+
+### Security Considerations
+
+Client tools execute LLM-generated, untrusted input on the client. When exposing them:
+
+- The input schema describes the tool to the LLM; it is not validation. Re-validate types, value ranges, and target IDs on the client before applying anything.
+- Do not expose general-purpose capabilities (arbitrary URL navigation, arbitrary `fetch`, HTML injection, JS evaluation, clipboard or whole-DOM reads). Insert text via `textContent`; allow-list URL schemes and hosts.
+- When resuming across HTTP requests, bind the resume endpoint to an authenticated user and conversation session — e.g. a single-use opaque continuation token with server-held state. Resume validation above is a fail-fast correctness check, not a trust boundary: conversation history accepted from a client must not be treated as trusted. Tool call IDs appear in the conversation and are visible to the LLM and the client; treat them as public values, never as authorization tokens.
+- Tool results are untrusted data to the LLM and can steer subsequent server tool calls. Return minimal structured results; never secrets, cookies, tokens, or whole-page content.
+- For state-changing UI operations, show the proposed change and get the user's approval on the client. This is why `confirm: true` is rejected for client tools: confirmation is the client's responsibility, not the server's.
+
+- Client tools are never dispatched server-side; the `Dispatcher` is bypassed entirely.
+- When a turn mixes server and client tool calls, server results are held in the agent instance and merged automatically on `resume()` / `resumeStream()`.
+- In a stateless HTTP setup, rebuild `Agent::$messages` from your persisted conversation before resuming. Held server results live in the agent instance and cannot be re-supplied on resume, so for a mixed turn rebuild the trailing assistant message with the client `tool_use` blocks only.
+
 ## Response Filtering
 
 Use `filter` to reduce the response body before sending to the LLM. This improves token efficiency for resources returning large payloads.
