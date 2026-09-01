@@ -149,6 +149,31 @@ The agent supports user confirmation before executing destructive tool calls.
 - `ToolList` provides `isConfirmable()` query — shared by both `Agent` and `StreamingAgent`
 - `ToolResult::cancelled()` encapsulates the cancellation message in the result object
 
+## Client Tools
+
+Tools executed by the client (browser UI, CLI) instead of being dispatched to a resource.
+
+### How it works
+
+1. `AgentFactory::addClientTools()` registers plain `Schema\Tool` definitions with `client: true` (the flag is enforced even when the given Tool lacks it)
+2. `ToolList::isClient()` identifies client tools — shared by `Agent` and `StreamingAgent`
+3. When the LLM calls a client tool, the run ends without dispatching it:
+   - `Agent::run()` returns `AgentResponse::clientToolUse()` (`STOP_CLIENT_TOOL_USE`, `clientToolCalls` carries the pending `ToolCall`s)
+   - `StreamingAgent::runStream()` yields `AgentEvent::clientToolCall(toolName, toolId, input)` per call, then the generator ends (no `COMPLETED` event)
+4. The consumer executes the calls client-side, then continues with `Agent::resume(list<ToolResult>)` / `StreamingAgent::resumeStream(list<ToolResult>)`
+
+### Key design decisions
+
+- Client tools bypass `Dispatcher` entirely — they are never executed server-side
+- Mixed turns (server + client calls): server tools are dispatched first; their results are held in `$pendingToolResults` and merged with the client results on resume, forming a single valid tool-results message
+- While awaiting the client, no tool-results message is appended — `$messages` always stays in a state valid for the next LLM call
+- `resume()`/`resumeStream()` do not add a user text message; the tool results message is the turn's input
+- `reset()` clears `$pendingToolResults` along with `$messages`
+- `Schema\Tool::$client` serializes to JSON as `client: true` only when true (same convention as `confirm`)
+- `resume()`/`resumeStream()` are concrete-class methods, not part of `AgentInterface`/`StreamingAgentInterface` (BC)
+- `ResumeValidator` accepts only client tool result IDs (classified via `ToolList::isClient()` from the trailing assistant message's `tool_use` block names); server results must already be held in `$pendingToolResults` — supplying them on resume is rejected. Stateless resume of a mixed turn replays the trailing assistant message with the client `tool_use` blocks only
+- Malformed client tool input JSON throws `JsonException` (`JSON_THROW_ON_ERROR`) instead of degrading to an empty array — the pre-existing lenient decodes in `dispatchPendingToolCalls()` / `StreamContentAccumulator` are out of this scope
+
 ## Response Filtering
 
 Filter tool response bodies before sending to LLM to reduce token usage.

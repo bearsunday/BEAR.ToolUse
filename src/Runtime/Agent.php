@@ -25,6 +25,12 @@ final class Agent implements OptionAwareAgentInterface
     /** @var list<Message> */
     public array $messages = [];
 
+    /** @var list<ToolResult> Server-side results held while awaiting client tool execution */
+    private array $pendingToolResults = [];
+
+    /** Every registered tool, used to classify client calls on resume */
+    private readonly ToolList $toolList;
+
     /** @param list<Tool> $tools */
     public function __construct(
         private readonly LlmClientInterface $client,
@@ -34,6 +40,7 @@ final class Agent implements OptionAwareAgentInterface
         private readonly int $maxIterations = 10,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
     ) {
+        $this->toolList = new ToolList($this->tools);
     }
 
     /**
@@ -48,6 +55,36 @@ final class Agent implements OptionAwareAgentInterface
 
         $this->messages[] = Message::user($userMessage);
 
+        return $this->loop($runTools, $options);
+    }
+
+    /**
+     * Resume the loop with client tool execution results
+     *
+     * Call after run() returned STOP_CLIENT_TOOL_USE. Server-side results
+     * from the interrupted turn are merged in automatically.
+     *
+     * @param list<ToolResult> $toolResults
+     *
+     * @throws InvalidResumeException When no client tool calls are awaiting results,
+     * a server call of the interrupted turn lacks its held result, or the supplied
+     * result IDs do not match the awaited client calls exactly once each.
+     */
+    public function resume(array $toolResults, AgentOptions|null $options = null): AgentResponse
+    {
+        ResumeValidator::validate($this->messages, $this->toolList, $this->pendingToolResults, $toolResults);
+
+        $runTools = $this->resolveTools($options);
+
+        $this->messages[]         = Message::toolResults([...$this->pendingToolResults, ...$toolResults]);
+        $this->pendingToolResults = [];
+
+        return $this->loop($runTools, $options);
+    }
+
+    /** @param list<Tool> $runTools */
+    private function loop(array $runTools, AgentOptions|null $options): AgentResponse
+    {
         for ($i = 0; $i < $this->maxIterations; $i++) {
             $request = $this->createRequest($runTools, $options);
             $response = $this->client->chat(
@@ -65,8 +102,17 @@ final class Agent implements OptionAwareAgentInterface
                     return AgentResponse::completed($response->content, $this->messages);
 
                 case 'tool_use':
-                    $this->recordAssistantResponse($response);
+                    // Recorded unconditionally: the tool_result message that follows
+                    // is only valid next to its tool_use blocks
+                    $this->messages[] = Message::assistant($response->content);
                     $toolResults      = $this->processToolCalls($response, $requestToolList);
+                    $clientToolCalls  = $this->clientToolCalls($response, $requestToolList);
+                    if ($clientToolCalls !== []) {
+                        $this->pendingToolResults = $toolResults;
+
+                        return AgentResponse::clientToolUse($response->content, $clientToolCalls, $this->messages);
+                    }
+
                     $this->messages[] = Message::toolResults($toolResults);
                     break;
 
@@ -111,7 +157,8 @@ final class Agent implements OptionAwareAgentInterface
     #[Override]
     public function reset(): void
     {
-        $this->messages = [];
+        $this->messages           = [];
+        $this->pendingToolResults = [];
     }
 
     /** @return list<ToolResult> */
@@ -125,6 +172,10 @@ final class Agent implements OptionAwareAgentInterface
                 continue;
             }
 
+            if ($toolList->isClient($toolCall->name)) {
+                continue;
+            }
+
             if ($this->isCancelled($toolCall, $response->getText(), $toolList)) {
                 $toolResults[] = ToolResult::cancelled($toolCall->id);
 
@@ -135,6 +186,21 @@ final class Agent implements OptionAwareAgentInterface
         }
 
         return $toolResults;
+    }
+
+    /** @return list<ToolCall> */
+    private function clientToolCalls(LlmResponse $response, ToolList $toolList): array
+    {
+        $clientToolCalls = [];
+        foreach ($response->toolCalls as $toolCall) {
+            if (! $toolList->isClient($toolCall->name)) {
+                continue;
+            }
+
+            $clientToolCalls[] = $toolCall;
+        }
+
+        return $clientToolCalls;
     }
 
     private function isCancelled(ToolCall $toolCall, string $llmText, ToolList $toolList): bool

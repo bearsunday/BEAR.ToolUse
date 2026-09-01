@@ -25,10 +25,11 @@ final readonly class Tool implements JsonSerializable
         public bool $confirm = false,
         /** @var class-string<ToolResultFilterInterface>|null */
         public string|null $filter = null,
+        public bool $client = false,
     ) {
     }
 
-    /** @return array{name: string, description: string, input_schema: InputSchema, confirm?: true} */
+    /** @return array{name: string, description: string, input_schema: InputSchema, confirm?: true, client?: true} */
     #[Override]
     public function jsonSerialize(): array
     {
@@ -40,6 +41,10 @@ final readonly class Tool implements JsonSerializable
 
         if ($this->confirm) {
             $data['confirm'] = true;
+        }
+
+        if ($this->client) {
+            $data['client'] = true;
         }
 
         return $data;

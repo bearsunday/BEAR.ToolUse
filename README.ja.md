@@ -157,6 +157,8 @@ foreach ($agent->runStream('記事を検索して', AgentOptions::withTools(['se
 }
 ```
 
+`resume()` / `resumeStream()` も同じ option を受け取ります。クライアントツールで中断した実行を、同じ制限のまま継続できます（[クライアントツール](#クライアントツール)を参照）。
+
 ### 6. Input/Output Processor
 
 Processor を使うと、Agent runtime を肥大化させずに各 LLM 呼び出しを拡張できます。Input Processor は LLM 呼び出し前に system prompt、messages、tools を加工できます。Output Processor は LLM 呼び出し後の response を検査・正規化できます。tool result 後の再問い合わせを含め、各 iteration で毎回適用されます。
@@ -448,6 +450,111 @@ StreamingAgent が再開: ツール実行またはキャンセル
 ```
 
 `send()` が呼ばれない場合（例: `iterator_to_array()`）、ツールは**デフォルトで拒否**されます（安全なデフォルト）。
+
+## クライアントツール
+
+リソースにディスパッチせず、クライアント側（ブラウザUI・CLI・エッジアプリ等）で実行するツールを公開できます。LLMがクライアントツールを呼ぶと、ランは保留中の呼び出しを消費者に引き渡して終了します。クライアント側で実行し、結果を渡して会話を再開します。
+
+これによりフロントエンドツール呼び出しが実現できます。LLMがUI更新（フォームフィールドへの入力等）を提案し、クライアントがユーザーを介在させて適用し、結果をLLMに報告する形です。
+
+### クライアントツールの登録
+
+クライアントツールはリソースではなく、素の `Tool` 定義です。`addClientTools()` で登録します:
+
+```php
+use BEAR\ToolUse\Schema\Tool;
+
+$agent = $agentFactory
+    ->addResources(['app://self/article'])
+    ->addClientTools([
+        new Tool('update_editor_field', 'エディタUIのフィールドを更新する', [
+            'type' => 'object',
+            'properties' => [
+                'field' => ['type' => 'string', 'enum' => ['title', 'description']],
+                'value' => ['type' => 'string'],
+            ],
+            'required' => ['field', 'value'],
+        ]),
+    ])
+    ->create('あなたは編集アシスタントです。');
+```
+
+`client: true` フラグは自動的に付与されます。クライアントツールに `confirm: true` は指定できません — ライブラリはクライアントツールの確認を強制しないため、承認が必要な操作はクライアント側で明示的に承認UIを実装してください（「セキュリティ上の考慮事項」参照）。また、ツール名はリソース・クライアントツールを通して一意である必要があります。違反は登録時に例外になります。
+
+### 同期エージェント
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\AgentResponse;
+
+$response = $agent->run('descriptionを改善して');
+
+if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
+    $results = [];
+    foreach ($response->clientToolCalls as $call) {
+        // $call->id, $call->name, $call->input を使いクライアント側で実行
+        $results[] = ToolResult::success($call->id, ['applied' => true]);
+    }
+
+    // 保留中の呼び出しごとに1件の結果を渡してループを継続
+    $final = $agent->resume($results);
+}
+```
+
+### ストリーミングエージェント
+
+```php
+use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\AgentEvent;
+
+$results = [];
+foreach ($agent->runStream($userMessage) as $event) {
+    if ($event->type === AgentEvent::CLIENT_TOOL_CALL) {
+        // toolName / toolId / input をクライアントに転送（例: SSE）
+        $results[] = ToolResult::success($event->data['toolId'], ['applied' => true]);
+    }
+}
+
+// ストリームは CLIENT_TOOL_CALL イベントの後に終了する。
+// 受け取った呼び出しごとに1件の結果を渡して継続:
+foreach ($agent->resumeStream($results) as $event) {
+    // ...
+}
+```
+
+### 動作の流れ
+
+```text
+LLM: tool_use update_editor_field({field: "description", value: "..."})
+  ↓
+同一ターンのサーバー側ツールは通常どおりディスパッチ
+  ↓
+ラン終了: CLIENT_TOOL_CALL イベント（ストリーミング）/ STOP_CLIENT_TOOL_USE（同期）
+  ↓
+クライアントがツールを実行（UI更新、ユーザーの採用/却下 等）
+  ↓
+resume() / resumeStream() に ToolResult を渡す
+  ↓
+LLMがそのターンの全ツール結果を受けて継続
+```
+
+### 再開時の検証
+
+`resume()` / `resumeStream()` は、末尾の assistant メッセージに結果待ちのクライアントツール呼び出しがあり、渡された結果IDが **クライアント呼び出し** と各1回ずつ完全一致する場合のみ受理します。不足・余剰・重複したID、`reset()` 後や完了済みランからの再開は `InvalidResumeException` で拒否されます。サーバーツールの結果は再開入力として決して受け付けません — サーバー結果はサーバー側で計算されインスタンス内に保持されるものであり、外部からの供給を要する再開は拒否されます。期待IDは会話そのものから導出するため、HTTPリクエストをまたいで新しいインスタンスに `$agent->messages` を再構築するステートレスな再開はそのまま機能します。サーバー・クライアント混在ターンの場合は、末尾の assistant メッセージをクライアントの `tool_use` ブロックのみで再構築してください。
+
+### セキュリティ上の考慮事項
+
+クライアントツールは「LLMが生成した未信頼の入力」をクライアント側で実行する機能です。公開する際は以下を徹底してください。
+
+- 入力スキーマはLLMへのツール説明であり、検証ではありません。適用前にクライアント側で型・値域・対象IDを必ず再検証してください。
+- 汎用的な能力（任意URLへの遷移、任意の `fetch`、HTML挿入、JS実行、クリップボードやDOM全体の読み取り）は公開しないでください。テキストは `textContent` で挿入し、URLはスキーム・ホストの許可リストで扱います。
+- HTTPリクエストをまたいで再開する場合、再開エンドポイントを認証済みユーザーと会話セッションに結び付けてください（例: サーバー側に状態を保持した一回限りの不透明な continuation token）。上記の再開時検証は fail-fast の正当性チェックであり、信頼境界ではありません。クライアントから受け取った会話履歴を信頼済みとして扱ってはいけません。ツール呼び出しIDは会話に含まれLLMにもクライアントにも見える公開値です。それ自体を認可トークンとして扱わないでください。
+- ツール結果もLLMにとっては未信頼データであり、後続のサーバーツール呼び出しを誘導し得ます。最小の構造化結果に限定し、秘密情報・Cookie・トークン・画面全体の内容は返さないでください。
+- 状態変更を伴うUI操作は、変更内容を表示してクライアント側でユーザーの承認を取ってください。クライアントツールで `confirm: true` を拒否しているのはこのためです。確認はサーバーではなくクライアントの責務です。
+
+- クライアントツールはサーバー側で決してディスパッチされません（`Dispatcher` を完全にバイパス）。
+- サーバーツールとクライアントツールが同一ターンに混在した場合、サーバー側の結果はエージェントインスタンスに保持され、`resume()` / `resumeStream()` 時に自動でマージされます。
+- ステートレスなHTTP構成では、再開前に永続化した会話から `Agent::$messages` を再構築してください。保持中のサーバー結果はインスタンス内にあり再開時に再供給できないため、混在ターンでは末尾の assistant メッセージをクライアントの `tool_use` ブロックのみで再構築します。
 
 ## レスポンスフィルタリング
 

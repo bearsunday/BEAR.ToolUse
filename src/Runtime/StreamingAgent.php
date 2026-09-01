@@ -11,10 +11,13 @@ use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
 use BEAR\ToolUse\Schema\Tool;
 use Generator;
+use JsonException;
 use Override;
 use Throwable;
 
 use function json_decode;
+
+use const JSON_THROW_ON_ERROR;
 
 /**
  * Streaming agent runtime
@@ -32,6 +35,12 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
     /** @var list<Message> */
     public array $messages = [];
 
+    /** @var list<ToolResult> Server-side results held while awaiting client tool execution */
+    private array $pendingToolResults = [];
+
+    /** Every registered tool, used to classify client calls on resume */
+    private readonly ToolList $toolList;
+
     /** @param list<Tool> $tools */
     public function __construct(
         private readonly StreamingLlmClientInterface $client,
@@ -40,6 +49,7 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
         private readonly string $systemPrompt,
         private readonly int $maxIterations = 10,
     ) {
+        $this->toolList = new ToolList($this->tools);
     }
 
     /** @return Generator<int, AgentEvent, mixed, void> */
@@ -49,6 +59,45 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
         $runTools = $this->resolveTools($options);
 
         $this->messages[] = Message::user($userMessage);
+
+        yield from $this->loop($runTools, $options);
+    }
+
+    /**
+     * Resume the loop with client tool execution results
+     *
+     * Call after runStream() ended with CLIENT_TOOL_CALL events. Server-side
+     * results from the interrupted turn are merged in automatically.
+     * Validation runs eagerly at call time (not at first iteration) so the
+     * consumer can reject an invalid resume before starting a response stream.
+     *
+     * @param list<ToolResult> $toolResults
+     *
+     * @return Generator<int, AgentEvent, mixed, void>
+     *
+     * @throws InvalidResumeException When no client tool calls are awaiting results,
+     * a server call of the interrupted turn lacks its held result, or the supplied
+     * result IDs do not match the awaited client calls exactly once each.
+     */
+    public function resumeStream(array $toolResults, AgentOptions|null $options = null): Generator
+    {
+        ResumeValidator::validate($this->messages, $this->toolList, $this->pendingToolResults, $toolResults);
+
+        $runTools = $this->resolveTools($options);
+
+        $this->messages[] = Message::toolResults([...$this->pendingToolResults, ...$toolResults]);
+        $this->pendingToolResults = [];
+
+        return $this->loop($runTools, $options);
+    }
+
+    /**
+     * @param list<Tool> $runTools
+     *
+     * @return Generator<int, AgentEvent, mixed, void>
+     */
+    private function loop(array $runTools, AgentOptions|null $options): Generator
+    {
         $fullText = '';
         $hadPreviousText = false;
 
@@ -81,24 +130,23 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
             if ($state->stopReason === 'tool_use' && $state->pendingToolCalls !== []) {
                 $this->messages[] = Message::assistant($state->contentBlocks);
 
-                $dispatchGen = $this->dispatchPendingToolCalls(
-                    $state->pendingToolCalls,
-                    $state->currentText,
-                    $requestToolList,
-                );
-                while ($dispatchGen->valid()) {
+                // Manual iteration keeps this generator's key sequence intact
+                // (a nested `yield from` would restart keys and break iterator_to_array())
+                $turnGen = $this->processToolUseTurn($state, $requestToolList);
+                while ($turnGen->valid()) {
                     /** @var AgentEvent $currentEvent */
-                    $currentEvent = $dispatchGen->current();
+                    $currentEvent = $turnGen->current();
                     /** @psalm-suppress MixedAssignment */
                     $sent = yield $currentEvent;
-                    /** @var bool $approved */
-                    $approved = $sent;
-                    $dispatchGen->send($approved);
+                    $turnGen->send($sent);
                 }
 
-                /** @var list<ToolResult> $toolResults */
-                $toolResults = $dispatchGen->getReturn();
-                $this->messages[] = Message::toolResults($toolResults);
+                $awaitingClient = $turnGen->getReturn();
+                if ($awaitingClient) {
+                    // Run ends awaiting client execution; resume with resumeStream()
+                    return;
+                }
+
                 if ($state->currentText !== '') {
                     $hadPreviousText = true;
                 }
@@ -121,6 +169,75 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
     public function reset(): void
     {
         $this->messages = [];
+        $this->pendingToolResults = [];
+    }
+
+    /**
+     * Dispatch server tools, then hand remaining client tool calls to the consumer
+     *
+     * @return Generator<int, AgentEvent, mixed, bool> True when the run ends awaiting client execution
+     *
+     * @throws JsonException When the LLM produced malformed JSON for a client tool call —
+     * the input would otherwise silently degrade to an empty array and be executed as such.
+     */
+    private function processToolUseTurn(StreamIterationState $state, ToolList $toolList): Generator
+    {
+        [$serverCalls, $clientCalls] = $this->partitionPendingToolCalls($state->pendingToolCalls, $toolList);
+
+        $toolResults = [];
+        if ($serverCalls !== []) {
+            $dispatchGen = $this->dispatchPendingToolCalls($serverCalls, $state->currentText, $toolList);
+            while ($dispatchGen->valid()) {
+                /** @var AgentEvent $currentEvent */
+                $currentEvent = $dispatchGen->current();
+                /** @psalm-suppress MixedAssignment */
+                $sent = yield $currentEvent;
+                /** @var bool $approved */
+                $approved = $sent;
+                $dispatchGen->send($approved);
+            }
+
+            /** @var list<ToolResult> $toolResults */
+            $toolResults = $dispatchGen->getReturn();
+        }
+
+        if ($clientCalls !== []) {
+            $this->pendingToolResults = $toolResults;
+            foreach ($clientCalls as $pending) {
+                /** @var array<string, mixed> $input */
+                $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+
+                yield AgentEvent::clientToolCall($pending->name, $pending->id, $input);
+            }
+
+            return true;
+        }
+
+        $this->messages[] = Message::toolResults($toolResults);
+
+        return false;
+    }
+
+    /**
+     * @param list<PendingToolCall> $pendingToolCalls
+     *
+     * @return array{list<PendingToolCall>, list<PendingToolCall>} Server-dispatched calls and client-executed calls
+     */
+    private function partitionPendingToolCalls(array $pendingToolCalls, ToolList $toolList): array
+    {
+        $serverCalls = [];
+        $clientCalls = [];
+        foreach ($pendingToolCalls as $pending) {
+            if ($toolList->isClient($pending->name)) {
+                $clientCalls[] = $pending;
+
+                continue;
+            }
+
+            $serverCalls[] = $pending;
+        }
+
+        return [$serverCalls, $clientCalls];
     }
 
     private function recordContentBlocks(StreamIterationState $state): void
