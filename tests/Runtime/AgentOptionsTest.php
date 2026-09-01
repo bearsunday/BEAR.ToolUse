@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Runtime;
 
+use BEAR\ToolUse\Fake\FakeInputProcessor;
+use BEAR\ToolUse\Fake\FakeOutputProcessor;
 use BEAR\ToolUse\Schema\Tool;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -60,6 +62,40 @@ final class AgentOptionsTest extends TestCase
         $this->expectExceptionMessage('Unknown tool(s): missing_tool');
 
         $options->filterTools([$this->tool('article_get')]);
+    }
+
+    public function testMergeDefaultsIntersectsToolRestrictions(): void
+    {
+        $defaults = AgentOptions::withTools(['article_get', 'article_post']);
+        $options = AgentOptions::withTools(['article_post', 'article_delete']);
+
+        $merged = $options->mergeDefaults($defaults);
+
+        $this->assertSame(['article_post'], $merged->enabledTools);
+    }
+
+    public function testMergeDefaultsKeepsTheSideThatRestricts(): void
+    {
+        $restricted = AgentOptions::withTools(['article_get']);
+        $unrestricted = new AgentOptions();
+
+        $this->assertSame(['article_get'], $unrestricted->mergeDefaults($restricted)->enabledTools);
+        $this->assertSame(['article_get'], $restricted->mergeDefaults($unrestricted)->enabledTools);
+        $this->assertNull($unrestricted->mergeDefaults($unrestricted)->enabledTools);
+    }
+
+    public function testMergeDefaultsChainsProcessorsAfterTheDefaults(): void
+    {
+        $defaultInput = new FakeInputProcessor(' default.');
+        $defaultOutput = new FakeOutputProcessor('default');
+        $callerInput = new FakeInputProcessor(' caller.');
+        $callerOutput = new FakeOutputProcessor('caller');
+
+        $merged = AgentOptions::withProcessors([$callerInput], [$callerOutput])
+            ->mergeDefaults(AgentOptions::withProcessors([$defaultInput], [$defaultOutput]));
+
+        $this->assertSame([$defaultInput, $callerInput], $merged->inputProcessors);
+        $this->assertSame([$defaultOutput, $callerOutput], $merged->outputProcessors);
     }
 
     private function tool(string $name): Tool

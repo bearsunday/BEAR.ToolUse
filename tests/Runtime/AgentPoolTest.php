@@ -157,6 +157,26 @@ final class AgentPoolTest extends TestCase
         $this->assertSame("Review this.\n\n<context>\n{\"id\":1}\n</context>", $llmClient->calls[0]['messages'][0]->content[0]['text']);
     }
 
+    public function testProfileOptionsStayACeilingForPerCallOptions(): void
+    {
+        [$pool, $llmClient] = $this->createPool();
+        $pool->register(new AgentProfile(
+            name: 'critic',
+            description: 'Review design risks',
+            systemPrompt: 'You are a critic.',
+            resources: ['app://self/article'],
+            options: AgentOptions::withTools(['article_get']),
+        ));
+        $agent = $pool->create('critic');
+        $llmClient->queueTextResponse('Reviewed.');
+
+        // The caller asks for more than the profile allows; only the overlap survives
+        $agent->run('Review this.', AgentOptions::withTools(['article_get', 'article_post']));
+
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $llmClient->calls[0]['tools']);
+        $this->assertSame(['article_get'], $toolNames);
+    }
+
     public function testDelegatorFallsBackForNonAgentTool(): void
     {
         [$pool] = $this->createPool();

@@ -14,6 +14,7 @@ use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
+use Override;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
@@ -149,6 +150,51 @@ final class AgentClientToolTest extends TestCase
         $this->assertSame('call_server', $toolResultMessage->content[0]['tool_use_id']);
         $this->assertFalse($toolResultMessage->content[0]['is_error']);
         $this->assertSame('call_client', $toolResultMessage->content[1]['tool_use_id']);
+    }
+
+    public function testDisabledClientToolIsAnsweredWithAnErrorInsteadOfHandedToTheClient(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+        $this->llmClient->queueTextResponse('Cannot update the editor here.');
+
+        $response = $this->agent->run('Update the title', AgentOptions::withTools(['article_get']));
+
+        $this->assertTrue($response->completed);
+        $messages = $this->llmClient->calls[1]['messages'];
+        $toolResultMessage = $messages[count($messages) - 1];
+        $this->assertSame('call_1', $toolResultMessage->content[0]['tool_use_id']);
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: ui_update', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testClientToolAddedByAnInputProcessorIsNotHandedToTheClient(): void
+    {
+        $processor = new class implements InputProcessorInterface {
+            #[Override]
+            public function process(LlmRequest $request): LlmRequest
+            {
+                return $request->withTools([
+                    ...$request->tools,
+                    new Tool('ui_pick', 'Pick a value on the client', [
+                        'type' => 'object',
+                        'properties' => ['value' => ['type' => 'string']],
+                        'required' => ['value'],
+                    ], client: true),
+                ]);
+            }
+        };
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_pick', ['value' => 'x']);
+        $this->llmClient->queueTextResponse('Done.');
+
+        // Unregistered tools are never client tools: the run stays server-side so
+        // the conversation is classified the same way on resume
+        $response = $this->agent->run('Pick a value', AgentOptions::withProcessors([$processor]));
+
+        $this->assertTrue($response->completed);
+        $messages = $this->llmClient->calls[1]['messages'];
+        $toolResultMessage = $messages[count($messages) - 1];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Unknown tool: ui_pick', $toolResultMessage->content[0]['content']);
     }
 
     public function testResumeAfterResetIsRejected(): void

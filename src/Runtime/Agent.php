@@ -64,6 +64,10 @@ final class Agent implements OptionAwareAgentInterface
      * Call after run() returned STOP_CLIENT_TOOL_USE. Server-side results
      * from the interrupted turn are merged in automatically.
      *
+     * Not part of AgentInterface / OptionAwareAgentInterface (kept out for BC),
+     * so consumers that resume must type against this class rather than against
+     * the interface AgentFactory::create() returns.
+     *
      * @param list<ToolResult> $toolResults
      *
      * @throws InvalidResumeException When no client tool calls are awaiting results,
@@ -102,6 +106,14 @@ final class Agent implements OptionAwareAgentInterface
                     return AgentResponse::completed($response->content, $this->messages);
 
                 case 'tool_use':
+                    if ($response->toolCalls === []) {
+                        // Nothing to dispatch: a tool results message would have no
+                        // tool_use block to pair with. StreamingAgent ends the same way.
+                        $this->recordAssistantResponse($response);
+
+                        return AgentResponse::completed($response->content, $this->messages);
+                    }
+
                     // Recorded unconditionally: the tool_result message that follows
                     // is only valid next to its tool_use blocks
                     $this->messages[] = Message::assistant($response->content);
@@ -172,7 +184,7 @@ final class Agent implements OptionAwareAgentInterface
                 continue;
             }
 
-            if ($toolList->isClient($toolCall->name)) {
+            if ($this->toolList->isClient($toolCall->name)) {
                 continue;
             }
 
@@ -188,12 +200,22 @@ final class Agent implements OptionAwareAgentInterface
         return $toolResults;
     }
 
-    /** @return list<ToolCall> */
-    private function clientToolCalls(LlmResponse $response, ToolList $toolList): array
+    /**
+     * Client tool calls to hand to the consumer
+     *
+     * Client-ness comes from the registered tools, not from the request: the
+     * conversation is classified the same way on resume, including a stateless
+     * resume that never saw this request. A registered client tool that this run
+     * disabled is not handed over — `processToolCalls()` already answered it with
+     * a "not enabled" error result.
+     *
+     * @return list<ToolCall>
+     */
+    private function clientToolCalls(LlmResponse $response, ToolList $requestToolList): array
     {
         $clientToolCalls = [];
         foreach ($response->toolCalls as $toolCall) {
-            if (! $toolList->isClient($toolCall->name)) {
+            if (! $this->toolList->isClient($toolCall->name) || ! $requestToolList->has($toolCall->name)) {
                 continue;
             }
 

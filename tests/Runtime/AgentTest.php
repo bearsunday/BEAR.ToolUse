@@ -328,6 +328,24 @@ final class AgentTest extends TestCase
         $this->assertCount(1, $response->messages);
     }
 
+    public function testToolUseWithoutToolCallsCompletesLikeStreaming(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'tool_use',
+            content: [['type' => 'text', 'text' => 'Nothing to call.']],
+            toolCalls: [],
+        ));
+
+        $response = $this->agent->run('Do something');
+
+        $this->assertTrue($response->completed);
+        $this->assertSame('Nothing to call.', $response->getText());
+        // No tool results message: it would have no tool_use block to pair with
+        $this->assertCount(2, $this->agent->messages);
+        $this->assertSame('assistant', $this->agent->messages[1]->role);
+        $this->assertCount(1, $this->llmClient->calls);
+    }
+
     public function testAgentResponseStopReasonCompleted(): void
     {
         $response = AgentResponse::completed([['type' => 'text', 'text' => 'Done']]);

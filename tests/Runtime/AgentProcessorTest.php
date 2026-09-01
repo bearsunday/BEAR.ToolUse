@@ -29,6 +29,7 @@ use function iterator_to_array;
 #[CoversClass(Agent::class)]
 #[CoversClass(StreamingAgent::class)]
 #[CoversClass(AgentOptions::class)]
+#[CoversClass(OutputProcessorGuard::class)]
 #[CoversClass(LlmRequest::class)]
 final class AgentProcessorTest extends TestCase
 {
@@ -181,9 +182,65 @@ final class AgentProcessorTest extends TestCase
         $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
 
         $this->expectException(UnexpectedValueException::class);
-        $this->expectExceptionMessage('Output processor must preserve tool_use stop reason.');
+        $this->expectExceptionMessage('Output processor must preserve the stop reason.');
 
         $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testAgentOutputProcessorCannotTurnATextAnswerIntoAToolCall(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                return new LlmResponse(
+                    'tool_use',
+                    [['type' => 'tool_use', 'id' => 'injected', 'name' => 'article_get', 'input' => ['id' => 1]]],
+                    [new ToolCall('injected', 'article_get', ['id' => 1])],
+                );
+            }
+        };
+
+        $llmClient->queueTextResponse('Raw response.');
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve the stop reason.');
+
+        $agent->run('Hello', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testAgentOutputProcessorCannotInjectToolCallsIntoATextAnswer(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                return new LlmResponse(
+                    $output->stopReason,
+                    $output->content,
+                    [new ToolCall('injected', 'article_get', ['id' => 1])],
+                );
+            }
+        };
+
+        $llmClient->queueTextResponse('Raw response.');
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve the tool calls.');
+
+        $agent->run('Hello', AgentOptions::withProcessors(outputProcessors: [$processor]));
     }
 
     public function testAgentOutputProcessorMustPreserveOriginalToolCalls(): void
@@ -209,7 +266,7 @@ final class AgentProcessorTest extends TestCase
         $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
 
         $this->expectException(UnexpectedValueException::class);
-        $this->expectExceptionMessage('Output processor must preserve tool_use tool calls.');
+        $this->expectExceptionMessage('Output processor must preserve the tool calls.');
 
         $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
     }
@@ -233,7 +290,7 @@ final class AgentProcessorTest extends TestCase
         $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
 
         $this->expectException(UnexpectedValueException::class);
-        $this->expectExceptionMessage('Output processor must preserve tool_use tool calls.');
+        $this->expectExceptionMessage('Output processor must preserve the tool calls.');
 
         $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
     }

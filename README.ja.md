@@ -186,9 +186,9 @@ $response = $agent->run(
 );
 ```
 
-`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。受け取ったものと同じ具体型を返す必要があります。text content は書き換えられますが、runtime が tool call を安全に dispatch できるように tool-use の制御データは保持してください。
+`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。受け取ったものと同じ具体型を返す必要があります。text content は書き換えられますが、runtime が分岐に使う制御データはそのまま保持してください。対象は全 response の stop reason と tool call（id・name・input）、および `tool_use` response の `tool_use` content block です。text 応答を tool call に変えることも、別の tool call に差し替えることもできません（`UnexpectedValueException` になります）。
 
-`AlpsContextInputProcessor` を使うと、ALPS を runtime context として注入できます。現在の LLM 呼び出しで利用可能な tool に一致する `safe` / `unsafe` などの transition descriptor と、tool input に一致する semantic descriptor を追加します。tool descriptor は tool 名（または camelCase 形）で照合されるため、`article_get` tool には `article_get` または `articleGet` のような ALPS descriptor id が必要です。tool input parameter は semantic descriptor のみを参照します。
+`AlpsContextInputProcessor` を使うと、ALPS を runtime context として注入できます。現在の LLM 呼び出しで利用可能な tool に一致する `safe` / `unsafe` などの transition descriptor と、tool input に一致する semantic descriptor を、末尾の user メッセージにマージします（tool ループ中はそのメッセージが `tool_result` block を持つため、後ろに別メッセージを足すと tool-result ターンが壊れます）。tool descriptor は tool 名（または camelCase 形）で照合されるため、`article_get` tool には `article_get` または `articleGet` のような ALPS descriptor id が必要です。tool input parameter は semantic descriptor のみを参照します。
 
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
@@ -255,6 +255,10 @@ $response = $delegator->ask('critic', 'この設計のリスクは？', ['articl
 ```
 
 `AgentPool` が作成する Subagent は、pool に `ConfirmationHandlerInterface` が設定されていない場合、確認対象 tool をデフォルトで拒否します。Subagent に `#[Tool(confirm: true)]` の resource 実行を許可したい場合は、`AgentPool` に confirmation handler を渡してください。
+
+`AgentProfile` は自身の `AgentOptions` を持てます。呼び出し単位の option は profile の option を置き換えるのではなくマージされます。tool 制限は積集合になるため、呼び出し側は profile が許した範囲を狭められますが広げられません。processor は profile 側を先頭にして連結されます。
+
+tool 名は factory に登録するすべてで一意である必要があります。同じ resource の二重登録、同名 agent を持つ複数 pool、同じパスの別スキーム URI（`app://self/article` と `page://self/article`）は `DuplicateToolNameException` になります。`#[Tool(name: ...)]` でどちらかに別名を付けてください。
 
 ### 8. 会話履歴
 
@@ -500,6 +504,8 @@ if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
     $final = $agent->resume($results);
 }
 ```
+
+`resume()` / `resumeStream()` は `Agent` / `StreamingAgent` のメソッドであり、`AgentInterface` / `StreamingAgentInterface` には含まれません（BC のため）。`AgentFactory::create()` の戻り値型はインターフェイスなので、resume する変数は具象クラスで型付けする（または `instanceof` で絞る）と静的解析が通ります。
 
 ### ストリーミングエージェント
 
@@ -814,6 +820,7 @@ Dispatcherが検出するエラー:
 | `AgentFactory` | エージェントのビルダー（同期・ストリーミング） |
 | `AgentOptions` | ツール制限などの呼び出し単位オプション |
 | `LlmRequest` | Input Processor に渡される LLM request |
+| `OutputProcessorGuard` | tool-use 制御データを変える Output Processor を拒否 |
 | `AlpsContextInputProcessor` | 関連する ALPS descriptor を各 LLM request に追加 |
 | `AlpsToolPolicyInputProcessor` | ALPS transition type に一致する tool だけに絞り込み |
 | `AgentProfile` | Named Subagent の設定 |

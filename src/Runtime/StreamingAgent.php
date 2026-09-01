@@ -71,6 +71,10 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
      * Validation runs eagerly at call time (not at first iteration) so the
      * consumer can reject an invalid resume before starting a response stream.
      *
+     * Not part of StreamingAgentInterface / OptionAwareStreamingAgentInterface
+     * (kept out for BC), so consumers that resume must type against this class
+     * rather than against the interface AgentFactory::createStreaming() returns.
+     *
      * @param list<ToolResult> $toolResults
      *
      * @return Generator<int, AgentEvent, mixed, void>
@@ -219,6 +223,14 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
     }
 
     /**
+     * Split pending calls into server-dispatched and client-executed ones
+     *
+     * Client-ness comes from the registered tools, not from the request: the
+     * conversation is classified the same way on resume, including a stateless
+     * resume that never saw this request. A registered client tool that this run
+     * disabled stays on the server side, where it is answered with a "not
+     * enabled" error result instead of being handed to the consumer.
+     *
      * @param list<PendingToolCall> $pendingToolCalls
      *
      * @return array{list<PendingToolCall>, list<PendingToolCall>} Server-dispatched calls and client-executed calls
@@ -228,7 +240,7 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
         $serverCalls = [];
         $clientCalls = [];
         foreach ($pendingToolCalls as $pending) {
-            if ($toolList->isClient($pending->name)) {
+            if ($this->toolList->isClient($pending->name) && $toolList->has($pending->name)) {
                 $clientCalls[] = $pending;
 
                 continue;

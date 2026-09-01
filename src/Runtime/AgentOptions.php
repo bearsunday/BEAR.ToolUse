@@ -4,23 +4,20 @@ declare(strict_types=1);
 
 namespace BEAR\ToolUse\Runtime;
 
-use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
-use BEAR\ToolUse\Types;
 use InvalidArgumentException;
 use UnexpectedValueException;
 
 use function array_fill_keys;
-use function count;
+use function array_intersect;
+use function array_values;
 use function implode;
 use function sprintf;
 
 /**
  * Per-run agent options
- *
- * @psalm-import-type ContentBlock from Types
  */
 final readonly class AgentOptions
 {
@@ -57,6 +54,36 @@ final readonly class AgentOptions
             inputProcessors: $inputProcessors,
             outputProcessors: $outputProcessors,
         );
+    }
+
+    /**
+     * Merge this option set over $defaults
+     *
+     * Tool restrictions intersect, so a caller can narrow what a default set
+     * allows but never widen it — a subagent profile's restriction stays a
+     * ceiling. Processors chain with the defaults' first.
+     */
+    public function mergeDefaults(self $defaults): self
+    {
+        return new self(
+            enabledTools: $this->mergeEnabledTools($defaults),
+            inputProcessors: [...$defaults->inputProcessors, ...$this->inputProcessors],
+            outputProcessors: [...$defaults->outputProcessors, ...$this->outputProcessors],
+        );
+    }
+
+    /** @return list<string>|null */
+    private function mergeEnabledTools(self $defaults): array|null
+    {
+        if ($this->enabledTools === null) {
+            return $defaults->enabledTools;
+        }
+
+        if ($defaults->enabledTools === null) {
+            return $this->enabledTools;
+        }
+
+        return array_values(array_intersect($this->enabledTools, $defaults->enabledTools));
     }
 
     public function filtersTools(): bool
@@ -134,7 +161,7 @@ final readonly class AgentOptions
             }
         }
 
-        $this->assertToolUseContentIsPreserved($response, $output);
+        (new OutputProcessorGuard())->assertResponse($response, $output);
 
         return $output;
     }
@@ -153,101 +180,8 @@ final readonly class AgentOptions
             }
         }
 
-        $this->assertStreamEventIsPreserved($event, $output);
+        (new OutputProcessorGuard())->assertStreamEvent($event, $output);
 
         return $output;
-    }
-
-    private function assertToolUseContentIsPreserved(LlmResponse $input, LlmResponse $output): void
-    {
-        if ($input->stopReason !== 'tool_use' || $input->toolCalls === []) {
-            return;
-        }
-
-        if ($output->stopReason !== $input->stopReason) {
-            throw new UnexpectedValueException('Output processor must preserve tool_use stop reason.');
-        }
-
-        $this->assertToolCallsArePreserved($input, $output);
-
-        $toolUseBlocks = $this->toolUseBlocksById($output);
-
-        foreach ($input->toolCalls as $toolCall) {
-            if ($this->toolUseBlockMatchesToolCall($toolUseBlocks[$toolCall->id] ?? null, $toolCall)) {
-                continue;
-            }
-
-            throw new UnexpectedValueException('Output processor must preserve tool_use content blocks for tool calls.');
-        }
-    }
-
-    private function assertToolCallsArePreserved(LlmResponse $input, LlmResponse $output): void
-    {
-        if (count($output->toolCalls) !== count($input->toolCalls)) {
-            throw new UnexpectedValueException('Output processor must preserve tool_use tool calls.');
-        }
-
-        foreach ($input->toolCalls as $index => $toolCall) {
-            $outputToolCall = $output->toolCalls[$index] ?? null;
-            if (
-                $outputToolCall instanceof ToolCall
-                && $outputToolCall->id === $toolCall->id
-                && $outputToolCall->name === $toolCall->name
-                && $outputToolCall->input === $toolCall->input
-            ) {
-                continue;
-            }
-
-            throw new UnexpectedValueException('Output processor must preserve tool_use tool calls.');
-        }
-    }
-
-    /** @return array<string, ContentBlock> */
-    private function toolUseBlocksById(LlmResponse $response): array
-    {
-        $toolUseBlocks = [];
-        foreach ($response->content as $block) {
-            if ($block['type'] !== 'tool_use' || ! isset($block['id'])) {
-                continue;
-            }
-
-            $toolUseBlocks[$block['id']] = $block;
-        }
-
-        return $toolUseBlocks;
-    }
-
-    /** @param array{type: string, text?: string, id?: string, name?: string, input?: array<string, mixed>}|null $block */
-    private function toolUseBlockMatchesToolCall(array|null $block, ToolCall $toolCall): bool
-    {
-        return $block !== null
-            && ($block['name'] ?? null) === $toolCall->name
-            && ($block['input'] ?? null) === $toolCall->input;
-    }
-
-    private function assertStreamEventIsPreserved(StreamEvent $input, StreamEvent $output): void
-    {
-        if ($input->type !== $output->type) {
-            throw new UnexpectedValueException('Output processor must preserve stream event type.');
-        }
-
-        foreach ($this->streamEventPreservedKeys($input->type) as $key) {
-            if (($input->data[$key] ?? null) === ($output->data[$key] ?? null)) {
-                continue;
-            }
-
-            throw new UnexpectedValueException('Output processor must preserve stream tool-use control data.');
-        }
-    }
-
-    /** @return list<string> */
-    private function streamEventPreservedKeys(string $type): array
-    {
-        return match ($type) {
-            StreamEvent::TOOL_USE_START => ['id', 'name'],
-            StreamEvent::TOOL_USE_DELTA => ['input'],
-            StreamEvent::MESSAGE_STOP => ['stopReason'],
-            default => [],
-        };
     }
 }

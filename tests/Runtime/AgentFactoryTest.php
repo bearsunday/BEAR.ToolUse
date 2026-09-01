@@ -21,6 +21,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 
+use function array_map;
+
 #[CoversClass(AgentFactory::class)]
 final class AgentFactoryTest extends TestCase
 {
@@ -192,12 +194,24 @@ final class AgentFactoryTest extends TestCase
     public function testMixedSchemes(): void
     {
         $this->factory->addResources([
-            'app://self/article',
+            'app://self/user',
             'page://self/article',
         ]);
 
-        $tools = $this->factory->getTools();
-        $this->assertCount(2, $tools);
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $this->factory->getTools());
+        $this->assertContains('article_get', $toolNames);
+        $this->assertContains('user_get', $toolNames);
+    }
+
+    public function testSameToolNameFromTwoSchemesIsRejected(): void
+    {
+        $this->expectException(DuplicateToolNameException::class);
+        $this->expectExceptionMessage('Tool "article_get" is already registered.');
+
+        $this->factory->addResources([
+            'app://self/article',
+            'page://self/article',
+        ]);
     }
 
     public function testCreateStreamingAgent(): void

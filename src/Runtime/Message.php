@@ -47,6 +47,12 @@ final readonly class Message
         return new self('user', $content);
     }
 
+    /** Copy of this message with a text block appended to its content */
+    public function withText(string $text): self
+    {
+        return new self($this->role, [...$this->content, ['type' => 'text', 'text' => $text]]);
+    }
+
     /** @return array{role: string, content: list<array<string, mixed>>} */
     public function toArray(): array
     {

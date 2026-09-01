@@ -9,6 +9,7 @@ use BEAR\ToolUse\Schema\Tool;
 use Override;
 
 use function array_keys;
+use function array_slice;
 use function implode;
 use function lcfirst;
 use function str_replace;
@@ -21,6 +22,11 @@ use function ucwords;
  * name (or its camelCase form), including transition descriptors such as `safe`
  * and `unsafe`. Parameter descriptions are resolved only from semantic
  * descriptors whose id matches the input parameter name.
+ *
+ * The context is merged into the trailing user message rather than appended as a
+ * message of its own: inside a tool loop that message carries the `tool_result`
+ * blocks answering the previous turn, and a separate message after it would
+ * break the tool-result turn.
  */
 final readonly class AlpsContextInputProcessor implements InputProcessorInterface
 {
@@ -38,9 +44,16 @@ final readonly class AlpsContextInputProcessor implements InputProcessorInterfac
             return $request;
         }
 
+        $text = $this->heading . "\n" . implode("\n", $lines);
+        $messages = $request->messages;
+        $lastMessage = array_slice($messages, -1)[0] ?? null;
+        if ($lastMessage === null || $lastMessage->role !== 'user') {
+            return $request->withMessages([...$messages, Message::user($text)]);
+        }
+
         return $request->withMessages([
-            ...$request->messages,
-            Message::user($this->heading . "\n" . implode("\n", $lines)),
+            ...array_slice($messages, 0, -1),
+            $lastMessage->withText($text),
         ]);
     }
 

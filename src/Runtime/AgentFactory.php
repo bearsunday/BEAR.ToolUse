@@ -53,12 +53,22 @@ final class AgentFactory
     /**
      * Add already-built tools.
      *
+     * Tool names must be unique. Duplicates would send the LLM two definitions
+     * of the same name (the same resource added twice, two subagent pools
+     * sharing an agent name, or two resource URIs with the same path such as
+     * `app://self/article` and `page://self/article`) while `ToolRegistry` maps
+     * that name to whichever was registered last. Rename one of them with
+     * `#[Tool(name: ...)]` or a distinct `AgentProfile` name.
+     *
      * @param list<Tool> $tools
      *
      * @return $this
+     *
+     * @throws DuplicateToolNameException When a tool name is already registered.
      */
     public function addTools(array $tools): self
     {
+        $registeredNames = $this->registeredToolNames();
         foreach ($tools as $tool) {
             // A server tool named like a client tool would be classified as
             // client by ToolList and bypass the dispatcher entirely
@@ -68,6 +78,14 @@ final class AgentFactory
                 );
             }
 
+            if (isset($registeredNames[$tool->name])) {
+                throw new DuplicateToolNameException(sprintf(
+                    'Tool "%s" is already registered. Give one of them a distinct name with #[Tool(name: ...)]',
+                    $tool->name,
+                ));
+            }
+
+            $registeredNames[$tool->name] = true;
             $this->tools[] = $tool;
         }
 
@@ -111,11 +129,7 @@ final class AgentFactory
      */
     public function addClientTools(array $tools): self
     {
-        $registeredNames = [];
-        foreach ($this->tools as $registeredTool) {
-            $registeredNames[$registeredTool->name] = true;
-        }
-
+        $registeredNames = $this->registeredToolNames();
         foreach ($tools as $tool) {
             if ($tool->confirm) {
                 throw new ConfirmableClientToolException(sprintf(
@@ -175,6 +189,17 @@ final class AgentFactory
             systemPrompt: $systemPrompt,
             maxIterations: $maxIterations,
         );
+    }
+
+    /** @return array<string, true> */
+    private function registeredToolNames(): array
+    {
+        $registeredNames = [];
+        foreach ($this->tools as $registeredTool) {
+            $registeredNames[$registeredTool->name] = true;
+        }
+
+        return $registeredNames;
     }
 
     /**

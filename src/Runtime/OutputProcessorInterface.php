@@ -12,9 +12,11 @@ use BEAR\ToolUse\Llm\StreamEvent;
  *
  * Implementations must return the same concrete type they receive: `LlmResponse`
  * for normal agent calls and `StreamEvent` for streaming calls. Processors may
- * rewrite text content, but must preserve tool-use control data (`tool_use`
- * content blocks and stream tool-use ids/names/input) so the agent can dispatch
- * tools safely.
+ * rewrite text content, but the control data the agent branches on must survive
+ * untouched: the stop reason and the tool calls of every response, the
+ * `tool_use` content blocks of a `tool_use` response, and the stream tool-use
+ * ids/names/input. A processor can neither drop a tool call nor introduce one.
+ * `OutputProcessorGuard` enforces this after the processor chain runs.
  */
 interface OutputProcessorInterface
 {

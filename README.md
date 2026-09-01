@@ -186,9 +186,9 @@ $response = $agent->run(
 );
 ```
 
-`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents. It must return the same concrete type it receives. Text content may be rewritten, but tool-use control data must be preserved so the runtime can dispatch tool calls safely.
+`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents. It must return the same concrete type it receives. Text content may be rewritten, but the control data the runtime branches on must survive untouched: the stop reason and the tool calls (id, name, input) of every response, and the `tool_use` content blocks of a `tool_use` response. A processor cannot turn a text answer into a tool call, or a tool call into a different one — the runtime rejects it with `UnexpectedValueException`.
 
-You can use ALPS as runtime context with `AlpsContextInputProcessor`. It injects matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs. Tool descriptors match by tool name (or its camelCase form), so an `article_get` tool needs an ALPS descriptor id such as `article_get` or `articleGet`. Tool input parameters use semantic descriptors only.
+You can use ALPS as runtime context with `AlpsContextInputProcessor`. It merges matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs, into the trailing user message (inside a tool loop that message carries the `tool_result` blocks, so a separate message after it would break the tool-result turn). Tool descriptors match by tool name (or its camelCase form), so an `article_get` tool needs an ALPS descriptor id such as `article_get` or `articleGet`. Tool input parameters use semantic descriptors only.
 
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
@@ -255,6 +255,10 @@ $response = $delegator->ask('critic', 'What are the risks?', ['articleId' => 1])
 ```
 
 Subagents created by `AgentPool` deny confirmable tools by default when no `ConfirmationHandlerInterface` is configured on the pool. Pass a confirmation handler to `AgentPool` when subagents should be allowed to execute `#[Tool(confirm: true)]` resources.
+
+An `AgentProfile` can carry its own `AgentOptions`. Per-call options are merged over the profile's rather than replacing them: tool restrictions intersect, so a caller can narrow what the profile allows but never widen it, and processors chain with the profile's first.
+
+Tool names must be unique across everything registered on a factory. Adding the same resource twice, two pools sharing an agent name, or two URIs with the same path (`app://self/article` and `page://self/article`) throws `DuplicateToolNameException` — give one of them a distinct name with `#[Tool(name: ...)]`.
 
 ### 8. Conversation History
 
@@ -500,6 +504,8 @@ if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
     $final = $agent->resume($results);
 }
 ```
+
+`resume()` and `resumeStream()` are methods of `Agent` / `StreamingAgent`, not of `AgentInterface` / `StreamingAgentInterface` (kept out for BC). `AgentFactory::create()` is typed to the interface, so type the variable you resume against the concrete class (or narrow with `instanceof`) to keep static analysis happy.
 
 ### Streaming Agent
 
@@ -814,6 +820,7 @@ Errors detected by the Dispatcher:
 | `AgentFactory` | Builder for agents (sync and streaming) |
 | `AgentOptions` | Per-run options such as tool filtering |
 | `LlmRequest` | LLM request passed to input processors |
+| `OutputProcessorGuard` | Rejects output processors that alter tool-use control data |
 | `AlpsContextInputProcessor` | Adds relevant ALPS descriptors to each LLM request |
 | `AlpsToolPolicyInputProcessor` | Filters tools by matching ALPS transition types |
 | `AgentProfile` | Configuration for a named subagent |

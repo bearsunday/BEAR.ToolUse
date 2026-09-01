@@ -11,6 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 #[CoversClass(AlpsContextInputProcessor::class)]
 #[CoversClass(LlmRequest::class)]
+#[CoversClass(Message::class)]
 final class AlpsContextInputProcessorTest extends TestCase
 {
     private AlpsSemanticDictionary $dictionary;
@@ -44,10 +45,10 @@ final class AlpsContextInputProcessorTest extends TestCase
         $this->assertNotSame($request, $processed);
         $this->assertSame('system', $processed->systemPrompt);
         $this->assertSame($request->tools, $processed->tools);
-        $this->assertCount(2, $processed->messages);
+        $this->assertCount(1, $processed->messages);
         $this->assertSame(
             "Application semantics from ALPS:\n- user_get.userId: User identifier",
-            $processed->messages[1]->content[0]['text'],
+            $processed->messages[0]->content[1]['text'],
         );
     }
 
@@ -72,7 +73,7 @@ final class AlpsContextInputProcessorTest extends TestCase
 
         $this->assertSame(
             "Application semantics from ALPS:\n- user_post.user_name: Name of the user",
-            $processed->messages[1]->content[0]['text'],
+            $processed->messages[0]->content[1]['text'],
         );
     }
 
@@ -95,7 +96,7 @@ final class AlpsContextInputProcessorTest extends TestCase
 
         $this->assertSame(
             "Application semantics from ALPS:\n- userId: User identifier",
-            $processed->messages[1]->content[0]['text'],
+            $processed->messages[0]->content[1]['text'],
         );
     }
 
@@ -118,7 +119,7 @@ final class AlpsContextInputProcessorTest extends TestCase
 
         $this->assertSame(
             "Application semantics from ALPS:\n- goUserList [safe]: Open user list transition",
-            $processed->messages[1]->content[0]['text'],
+            $processed->messages[0]->content[1]['text'],
         );
     }
 
@@ -141,7 +142,7 @@ final class AlpsContextInputProcessorTest extends TestCase
 
         $this->assertSame(
             "Application semantics from ALPS:\n- go_user_list [safe]: Open user list transition",
-            $processed->messages[1]->content[0]['text'],
+            $processed->messages[0]->content[1]['text'],
         );
     }
 
@@ -167,6 +168,31 @@ final class AlpsContextInputProcessorTest extends TestCase
         $this->assertSame($request, $processed);
     }
 
+    public function testAppendsAMessageWhenTheConversationDoesNotEndWithAUserMessage(): void
+    {
+        $processor = new AlpsContextInputProcessor($this->dictionary);
+        $request = new LlmRequest(
+            'system',
+            [],
+            [
+                new Tool('user_get', 'Get user', [
+                    'type' => 'object',
+                    'properties' => ['userId' => ['type' => 'integer']],
+                    'required' => ['userId'],
+                ]),
+            ],
+        );
+
+        $processed = $processor->process($request);
+
+        $this->assertCount(1, $processed->messages);
+        $this->assertSame('user', $processed->messages[0]->role);
+        $this->assertSame(
+            "Application semantics from ALPS:\n- user_get.userId: User identifier",
+            $processed->messages[0]->content[0]['text'],
+        );
+    }
+
     public function testCustomHeading(): void
     {
         $processor = new AlpsContextInputProcessor($this->dictionary, 'ALPS context:');
@@ -188,7 +214,7 @@ final class AlpsContextInputProcessorTest extends TestCase
 
         $this->assertSame(
             "ALPS context:\n- resource_get.id: Resource identifier",
-            $processed->messages[1]->content[0]['text'],
+            $processed->messages[0]->content[1]['text'],
         );
     }
 
@@ -229,7 +255,7 @@ final class AlpsContextInputProcessorTest extends TestCase
             "Application semantics from ALPS:\n"
             . "- user_get.id: Resource identifier\n"
             . '- user_search.id: Resource identifier',
-            $processed->messages[1]->content[0]['text'],
+            $processed->messages[0]->content[1]['text'],
         );
     }
 }
