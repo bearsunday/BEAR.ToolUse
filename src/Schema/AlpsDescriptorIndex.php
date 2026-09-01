@@ -11,7 +11,7 @@ use function substr;
  * @phpstan-type Entry array{id: string, type: string, description: string|null, href: string|null}
  * @psalm-type Entry = array{id: string, type: string, description: string|null, href: string|null}
  */
-final class AlpsDescriptorIndex
+final readonly class AlpsDescriptorIndex
 {
     /** Maximum href chain depth (e.g. A -> B -> C). Guards against cycles. */
     private const HREF_RESOLUTION_DEPTH = 10;

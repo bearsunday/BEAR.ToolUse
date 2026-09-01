@@ -18,11 +18,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 
+use function array_map;
 use function count;
 
 #[CoversClass(Agent::class)]
 #[CoversClass(AgentResponse::class)]
 #[CoversClass(ResumeValidator::class)]
+#[CoversClass(AgentOptions::class)]
 #[CoversClass(ToolList::class)]
 final class AgentClientToolTest extends TestCase
 {
@@ -99,6 +101,20 @@ final class AgentClientToolTest extends TestCase
         $this->assertSame('user', $toolResultMessage->role);
         $this->assertSame('tool_result', $toolResultMessage->content[0]['type']);
         $this->assertSame('call_1', $toolResultMessage->content[0]['tool_use_id']);
+    }
+
+    public function testResumeAppliesPerCallToolFiltering(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+        $this->llmClient->queueTextResponse('The title has been updated.');
+        $options = AgentOptions::withTools(['ui_update']);
+
+        $this->agent->run('Update the title', $options);
+        $response = $this->agent->resume([ToolResult::success('call_1', ['applied' => true])], $options);
+
+        $this->assertTrue($response->completed);
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $this->llmClient->calls[1]['tools']);
+        $this->assertSame(['ui_update'], $toolNames);
     }
 
     public function testMixedServerAndClientToolCallsMergeOnResume(): void

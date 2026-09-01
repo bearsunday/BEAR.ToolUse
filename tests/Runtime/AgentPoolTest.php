@@ -157,21 +157,6 @@ final class AgentPoolTest extends TestCase
         $this->assertSame("Review this.\n\n<context>\n{\"id\":1}\n</context>", $llmClient->calls[0]['messages'][0]->content[0]['text']);
     }
 
-    public function testDelegatorCanDispatchKnownSubagentToolOnly(): void
-    {
-        [$pool] = $this->createPool();
-        $pool->register(new AgentProfile(
-            name: 'critic',
-            description: 'Review design risks',
-            systemPrompt: 'You are a critic.',
-        ));
-        $delegator = new AgentDelegator($pool);
-
-        $this->assertFalse($delegator->canDispatch('article_get'));
-        $this->assertTrue($delegator->canDispatch('ask_critic'));
-        $this->assertFalse($delegator->canDispatch('ask_missing'));
-    }
-
     public function testDelegatorFallsBackForNonAgentTool(): void
     {
         [$pool] = $this->createPool();

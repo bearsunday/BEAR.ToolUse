@@ -27,6 +27,7 @@ use function json_encode;
 #[CoversClass(StreamingAgent::class)]
 #[CoversClass(AgentEvent::class)]
 #[CoversClass(ResumeValidator::class)]
+#[CoversClass(AgentOptions::class)]
 #[CoversClass(ToolList::class)]
 final class StreamingAgentClientToolTest extends TestCase
 {
@@ -127,6 +128,31 @@ final class StreamingAgentClientToolTest extends TestCase
         $this->assertSame('user', $toolResultMessage->role);
         $this->assertSame('tool_result', $toolResultMessage->content[0]['type']);
         $this->assertSame('call_1', $toolResultMessage->content[0]['tool_use_id']);
+    }
+
+    public function testResumeStreamAppliesPerCallToolFiltering(): void
+    {
+        $toolInput = json_encode(['field' => 'title', 'value' => 'New']);
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+        $options = AgentOptions::withTools(['ui_update']);
+
+        iterator_to_array($this->agent->runStream('Update the title', $options));
+        iterator_to_array($this->agent->resumeStream([ToolResult::success('call_1', ['applied' => true])], $options));
+
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $this->llmClient->calls[1]['tools']);
+        $this->assertSame(['ui_update'], $toolNames);
     }
 
     public function testMixedServerAndClientCallsMergeOnResume(): void

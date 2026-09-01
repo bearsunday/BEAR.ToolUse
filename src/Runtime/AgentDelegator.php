@@ -48,15 +48,6 @@ final readonly class AgentDelegator implements DispatcherInterface
         return $agent->run($this->buildMessage($message, $context));
     }
 
-    public function canDispatch(string $toolName): bool
-    {
-        if (! str_starts_with($toolName, self::TOOL_PREFIX)) {
-            return false;
-        }
-
-        return $this->pool->has($this->agentNameFromTool($toolName));
-    }
-
     #[Override]
     public function dispatch(ToolCall $toolCall): ToolResult
     {

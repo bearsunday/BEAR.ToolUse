@@ -122,6 +122,10 @@ final readonly class AgentOptions
 
     public function processResponse(LlmResponse $response, LlmRequest $request): LlmResponse
     {
+        if ($this->outputProcessors === []) {
+            return $response;
+        }
+
         $output = $response;
         foreach ($this->outputProcessors as $processor) {
             $output = $processor->process($output, $request);
@@ -137,6 +141,10 @@ final readonly class AgentOptions
 
     public function processStreamEvent(StreamEvent $event, LlmRequest $request): StreamEvent
     {
+        if ($this->outputProcessors === []) {
+            return $event;
+        }
+
         $output = $event;
         foreach ($this->outputProcessors as $processor) {
             $output = $processor->process($output, $request);
