@@ -234,6 +234,7 @@ $pool->register(new AgentProfile(
     description: '設計上のリスクをレビューする',
     systemPrompt: 'You are a critical reviewer.',
     resources: ['app://self/article'],
+    maxIterations: 5,
 ));
 
 $delegator = new AgentDelegator($pool, $resourceDispatcher);
@@ -254,9 +255,11 @@ Subagent は直接呼び出すこともできます。
 $response = $delegator->ask('critic', 'この設計のリスクは？', ['articleId' => 1]);
 ```
 
-`AgentPool` が作成する Subagent は、pool に `ConfirmationHandlerInterface` が設定されていない場合、確認対象 tool をデフォルトで拒否します。Subagent に `#[Tool(confirm: true)]` の resource 実行を許可したい場合は、`AgentPool` に confirmation handler を渡してください。
+`AgentPool` が作成する Subagent は、pool に `ConfirmationHandlerInterface` が設定されていない場合、`DenyConfirmationHandler` により確認対象 tool をデフォルトで拒否します。Subagent に `#[Tool(confirm: true)]` の resource 実行を許可したい場合は、`AgentPool` に confirmation handler を渡してください。
 
 `AgentProfile` は自身の `AgentOptions` を持てます。呼び出し単位の option は profile の option を置き換えるのではなくマージされます。tool 制限は積集合になるため、呼び出し側は profile が許した範囲を狭められますが広げられません。processor は profile 側を先頭にして連結されます。
+
+`maxIterations` は Subagent 自身の tool ループの上限です（デフォルト 10）。反復のたびに coordinator のループとは別に LLM 呼び出しが 1 回増えるため、専門 Subagent にはその役割に必要な最小値を設定してください。
 
 tool 名は factory に登録するすべてで一意である必要があります。同じ resource の二重登録、同名 agent を持つ複数 pool、同じパスの別スキーム URI（`app://self/article` と `page://self/article`）は `DuplicateToolNameException` になります。`#[Tool(name: ...)]` でどちらかに別名を付けてください。
 
@@ -826,6 +829,8 @@ Dispatcherが検出するエラー:
 | `AgentProfile` | Named Subagent の設定 |
 | `AgentPool` | Named Subagent の登録・作成 |
 | `AgentDelegator` | `ask_*` tool call を Subagent に委譲 |
+| `ProfiledAgent` | profile のデフォルト option を適用する Subagent |
+| `DenyConfirmationHandler` | 確認対象の呼び出しをすべて拒否する confirmation handler |
 | `AgentResponse` | エージェント実行結果（同期） |
 | `AgentEvent` | ストリーミングイベント（`JsonSerializable`） |
 | `StreamEvent` | 低レベルLLMストリームイベント |

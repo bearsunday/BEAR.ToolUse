@@ -234,6 +234,7 @@ $pool->register(new AgentProfile(
     description: 'Review design risks',
     systemPrompt: 'You are a critical reviewer.',
     resources: ['app://self/article'],
+    maxIterations: 5,
 ));
 
 $delegator = new AgentDelegator($pool, $resourceDispatcher);
@@ -254,9 +255,11 @@ You can also call a subagent directly:
 $response = $delegator->ask('critic', 'What are the risks?', ['articleId' => 1]);
 ```
 
-Subagents created by `AgentPool` deny confirmable tools by default when no `ConfirmationHandlerInterface` is configured on the pool. Pass a confirmation handler to `AgentPool` when subagents should be allowed to execute `#[Tool(confirm: true)]` resources.
+Subagents created by `AgentPool` deny confirmable tools by default when no `ConfirmationHandlerInterface` is configured on the pool (`DenyConfirmationHandler` is used). Pass a confirmation handler to `AgentPool` when subagents should be allowed to execute `#[Tool(confirm: true)]` resources.
 
 An `AgentProfile` can carry its own `AgentOptions`. Per-call options are merged over the profile's rather than replacing them: tool restrictions intersect, so a caller can narrow what the profile allows but never widen it, and processors chain with the profile's first.
+
+`maxIterations` bounds the subagent's own tool loop (default: 10). Each iteration is an additional LLM call on top of the coordinator's loop, so give specialists the smallest value their task needs.
 
 Tool names must be unique across everything registered on a factory. Adding the same resource twice, two pools sharing an agent name, or two URIs with the same path (`app://self/article` and `page://self/article`) throws `DuplicateToolNameException` — give one of them a distinct name with `#[Tool(name: ...)]`.
 
@@ -826,6 +829,8 @@ Errors detected by the Dispatcher:
 | `AgentProfile` | Configuration for a named subagent |
 | `AgentPool` | Registry and factory for named subagents |
 | `AgentDelegator` | Dispatches `ask_*` tool calls to subagents |
+| `ProfiledAgent` | Agent that applies its profile's default options |
+| `DenyConfirmationHandler` | Confirmation handler that denies every confirmable call |
 | `AgentResponse` | Agent execution result (sync) |
 | `AgentEvent` | Streaming event (`JsonSerializable`) |
 | `StreamEvent` | Low-level LLM stream event |
