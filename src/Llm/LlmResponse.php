@@ -10,6 +10,11 @@ use function implode;
 
 /**
  * Response from LLM API
+ *
+ * When `stopReason` is `tool_use`, `content` must carry the `tool_use` blocks of
+ * `toolCalls` (same id, name and input). The agent records `content` as the
+ * assistant message and pairs the tool results with those blocks, so an adapter
+ * that fills `toolCalls` alone produces a conversation the LLM API rejects.
  */
 final readonly class LlmResponse
 {

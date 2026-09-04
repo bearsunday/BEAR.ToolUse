@@ -134,7 +134,136 @@ if ($response->completed) {
 }
 ```
 
-### 5. 会話履歴
+### 5. 呼び出し単位のツール制限
+
+`AgentOptions` を使うと、1回の `run()` で利用できるツールを制限できます。収集済みの Resource registry は変更せず、その呼び出しで LLM に渡す tool list だけを絞ります。
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+
+$response = $agent->run(
+    '記事を検索してください。変更はしないでください。',
+    AgentOptions::withTools(['article_get', 'search_get']),
+);
+```
+
+存在しない tool 名を指定した場合は、LLM 呼び出し前に例外になります。typo や policy 設定ミスを早期に検出できます。
+
+Streaming Agent でも同じ option を使えます。
+
+```php
+foreach ($agent->runStream('記事を検索して', AgentOptions::withTools(['search_get'])) as $event) {
+    // ...
+}
+```
+
+`resume()` / `resumeStream()` も同じ option を受け取ります。クライアントツールで中断した実行を、同じ制限のまま継続できます（[クライアントツール](#クライアントツール)を参照）。
+
+### 6. Input/Output Processor
+
+Processor を使うと、Agent runtime を肥大化させずに各 LLM 呼び出しを拡張できます。Input Processor は LLM 呼び出し前に system prompt、messages、tools を加工できます。tools は渡された集合を狭められますが広げられません。`AgentOptions` や subagent profile で除外された tool は除外のままです。Output Processor は LLM 呼び出し後の response を検査・正規化できます。tool result 後の再問い合わせを含め、各 iteration で毎回適用されます。
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\InputProcessorInterface;
+use BEAR\ToolUse\Runtime\LlmRequest;
+use BEAR\ToolUse\Runtime\Message;
+
+final class MemoryProcessor implements InputProcessorInterface
+{
+    public function process(LlmRequest $request): LlmRequest
+    {
+        return $request->withMessages([
+            ...$request->messages,
+            Message::user('既知の文脈: ユーザーは簡潔な回答を好む。'),
+        ]);
+    }
+}
+
+$response = $agent->run(
+    'この記事を要約して',
+    AgentOptions::withProcessors(inputProcessors: [new MemoryProcessor()]),
+);
+```
+
+`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。受け取ったものと同じ具体型を返す必要があります。text content は書き換えられますが、runtime が分岐に使う制御データはそのまま保持してください。対象は全 response の stop reason と tool call（id・name・input）、および `tool_use` response の `tool_use` content block です。text 応答を tool call に変えることも、別の tool call に差し替えることもできません。`tool_use` response では tool call 1件につき `tool_use` block をちょうど1件保持する必要もあります（追加・重複した block は、対応する `tool_result` を持たないまま次のリクエストに乗るためです）。いずれも `UnexpectedValueException` になります。
+
+`AlpsContextInputProcessor` を使うと、ALPS を runtime context として注入できます。現在の LLM 呼び出しで利用可能な tool に一致する `safe` / `unsafe` などの transition descriptor と、tool input に一致する semantic descriptor を、末尾の user メッセージにマージします（tool ループ中はそのメッセージが `tool_result` block を持つため、後ろに別メッセージを足すと tool-result ターンが壊れます）。tool descriptor は tool 名（または camelCase 形）で照合されるため、`article_get` tool には `article_get` または `articleGet` のような ALPS descriptor id が必要です。tool input parameter は semantic descriptor のみを参照します。
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\AlpsContextInputProcessor;
+use BEAR\ToolUse\Runtime\AlpsToolPolicyInputProcessor;
+use BEAR\ToolUse\Schema\AlpsSemanticDictionary;
+
+$alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
+
+$response = $agent->run(
+    'このユーザーを探して',
+    AgentOptions::withProcessors(inputProcessors: [
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
+ALPS の transition type を呼び出し単位の tool policy として使うこともできます。`safeOnly()` policy は、一致する ALPS descriptor が `safe` の tool だけを公開します。一致する descriptor がない tool は、`safeOnlyAllowingUnknownTools()` を使わない限り隠されます。冪等だが状態変更を伴う transition も許可する場合は `safeAndIdempotent()` を使います。この policy は、期待する tool が ALPS profile で網羅されている状態で使うか、移行中は unknown 許可 variant を選んでください。policy と context processor を組み合わせる場合は、policy を先に置くことで `AlpsContextInputProcessor` がフィルタ後に残った tool だけを説明できます。
+
+```php
+$response = $agent->run(
+    '現在のアカウント状態を変更せずに要約して',
+    AgentOptions::withProcessors(inputProcessors: [
+        AlpsToolPolicyInputProcessor::safeOnly($alps),
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
+### 7. Agent-as-Tool / Named Subagent
+
+専門エージェントを `AgentPool` に登録すると、`ask_{name}` という tool として公開できます。Subagent の会話履歴は呼び出しごとに隔離されます。
+
+```php
+use BEAR\ToolUse\Runtime\AgentDelegator;
+use BEAR\ToolUse\Runtime\AgentFactory;
+use BEAR\ToolUse\Runtime\AgentPool;
+use BEAR\ToolUse\Runtime\AgentProfile;
+
+$pool = new AgentPool($llmClient, $resourceDispatcher, $collector);
+$pool->register(new AgentProfile(
+    name: 'critic',
+    description: '設計上のリスクをレビューする',
+    systemPrompt: 'You are a critical reviewer.',
+    resources: ['app://self/article'],
+    maxIterations: 5,
+));
+
+$delegator = new AgentDelegator($pool, $resourceDispatcher);
+$factory = new AgentFactory($llmClient, $delegator, $collector, $registry);
+
+$agent = $factory
+    ->addResources(['app://self/article'])
+    ->addSubagents($pool)
+    ->create('あなたは調整役のエージェントです。');
+
+// LLM が ask_critic を呼ぶと、AgentDelegator が critic agent を実行し、
+// 結果を通常の tool_result として LLM に返します。
+```
+
+Subagent は直接呼び出すこともできます。
+
+```php
+$response = $delegator->ask('critic', 'この設計のリスクは？', ['articleId' => 1]);
+```
+
+`AgentPool` が作成する Subagent は、pool に `ConfirmationHandlerInterface` が設定されていない場合、`DenyConfirmationHandler` により確認対象 tool をデフォルトで拒否します。Subagent に `#[Tool(confirm: true)]` の resource 実行を許可したい場合は、`AgentPool` に confirmation handler を渡してください。
+
+`AgentProfile` は自身の `AgentOptions` を持てます。呼び出し単位の option は profile の option を置き換えるのではなくマージされます。tool 制限は積集合になるため、呼び出し側は profile が許した範囲を狭められますが広げられません。processor は profile 側を先頭にして連結されます。
+
+`maxIterations` は Subagent 自身の tool ループの上限です（デフォルト 10）。反復のたびに coordinator のループとは別に LLM 呼び出しが 1 回増えるため、専門 Subagent にはその役割に必要な最小値を設定してください。
+
+tool 名は factory に登録するすべてで一意である必要があります。同名 agent を持つ複数 pool は `DuplicateToolNameException`、tool 名が衝突する URI 同士（`app://self/article` と `page://self/article` はどちらも `article_get` になります）は `ToolRegistry` から `DuplicateToolMappingException` になります。`#[Tool(name: ...)]` でどちらかに別名を付けてください。登録はバッチ単位で検証してから反映するため、弾かれたバッチは factory と registry のどちらにも痕跡を残しません。
+
+### 8. 会話履歴
 
 エージェントは複数の `run()` 呼び出しにわたって会話履歴を保持します。
 
@@ -156,7 +285,9 @@ $response = $agent->run('このユーザーについてもっと教えて');
 $agent->reset();
 ```
 
-### 6. ストリーミングエージェント
+`AgentResponse::$messages` は、`Agent::run()` から返された場合は停止時点の会話履歴スナップショットです。`AgentResponse::completed($content)` などの factory を直接呼ぶ場合は、明示的に渡さない限り履歴は空です。
+
+### 9. ストリーミングエージェント
 
 リアルタイム出力（SSE、WebSocket）には、ストリーミングエージェントを使用します。LLMの出力に応じてイベントをyieldします。
 
@@ -307,7 +438,7 @@ Y → ツール実行
 N → "User cancelled this operation." → LLM: 「承知しました。」
 ```
 
-`ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。
+直接作成した `Agent` では、`ConfirmationHandlerInterface` がバインドされていない場合、確認対象ツールも通常通り実行されます（ブロックなし）。一方、`AgentPool` が作成する Subagent はより保守的で、pool に confirmation handler がない場合、確認対象の Subagent tool call はデフォルトでキャンセルされます。
 
 ### ストリーミングエージェントでの確認
 
@@ -361,7 +492,11 @@ $agent = $agentFactory
 
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\Agent;
 use BEAR\ToolUse\Runtime\AgentResponse;
+
+// resume() は create() が返すインターフェイスではなく Agent のメソッド
+assert($agent instanceof Agent);
 
 $response = $agent->run('descriptionを改善して');
 
@@ -377,11 +512,17 @@ if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
 }
 ```
 
+`resume()` / `resumeStream()` は `Agent` / `StreamingAgent` のメソッドであり、`AgentInterface` / `StreamingAgentInterface` には含まれません（BC のため）。`AgentFactory::create()` の戻り値型はインターフェイスなので、resume する変数は具象クラスで型付けする（または `instanceof` で絞る）と静的解析が通ります。
+
 ### ストリーミングエージェント
 
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Runtime\AgentEvent;
+use BEAR\ToolUse\Runtime\StreamingAgent;
+
+// resumeStream() はインターフェイスではなく StreamingAgent のメソッド
+assert($agent instanceof StreamingAgent);
 
 $results = [];
 foreach ($agent->runStream($userMessage) as $event) {
@@ -604,7 +745,7 @@ $dictionary = new AlpsSemanticDictionary('/path/to/profile.json');
 $converter = new SchemaConverter($dictionary);
 ```
 
-**JSON**と**XML**の両形式の ALPS プロファイルをサポートしています（ファイル拡張子で自動判別）。`semantic`記述子の`title`または`doc`がパラメータの説明として使用されます。同一プロファイル内の`href="#id"`参照は自動解決され、`safe` / `unsafe` / `idempotent`（トランジション）記述子は除外されます。
+**JSON**と**XML**の両形式の ALPS プロファイルをサポートしています（ファイル拡張子で自動判別）。`semantic`記述子の`title`または`doc`がパラメータの説明として使用されます。同一プロファイル内の`href="#id"`参照は自動解決されます。パラメータ説明では`safe` / `unsafe` / `idempotent`（トランジション）記述子は除外されますが、`AlpsContextInputProcessor` は一致する transition descriptor を runtime context として利用できます。
 
 ## パラメータ説明の優先順位
 
@@ -672,8 +813,12 @@ Dispatcherが検出するエラー:
 | `SchemaConverterInterface` | リソースからツール定義への変換 |
 | `ToolCollectorInterface` | ツールの収集と登録 |
 | `AgentInterface` | エージェントランタイム |
+| `OptionAwareAgentInterface` | 呼び出し単位の `AgentOptions` に対応したエージェントランタイム |
 | `StreamingAgentInterface` | ストリーミングエージェントランタイム |
+| `OptionAwareStreamingAgentInterface` | 呼び出し単位の `AgentOptions` に対応したストリーミングエージェントランタイム |
 | `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
+| `InputProcessorInterface` | LLM 呼び出し前に request を処理 |
+| `OutputProcessorInterface` | LLM 呼び出し後に response または stream event を処理 |
 | `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
 | `ToolCallObserverInterface` | ディスパッチごとに 1 回呼ばれるフック（監査・メトリクス・レイテンシ計測） |
 
@@ -684,6 +829,16 @@ Dispatcherが検出するエラー:
 | `Agent` | LLMとの会話ループを管理 |
 | `StreamingAgent` | `AgentEvent`をyieldするストリーミング会話ループ |
 | `AgentFactory` | エージェントのビルダー（同期・ストリーミング） |
+| `AgentOptions` | ツール制限などの呼び出し単位オプション |
+| `LlmRequest` | Input Processor に渡される LLM request |
+| `OutputProcessorGuard` | tool-use 制御データを変える Output Processor を拒否 |
+| `AlpsContextInputProcessor` | 関連する ALPS descriptor を各 LLM request に追加 |
+| `AlpsToolPolicyInputProcessor` | ALPS transition type に一致する tool だけに絞り込み |
+| `AgentProfile` | Named Subagent の設定 |
+| `AgentPool` | Named Subagent の登録・作成 |
+| `AgentDelegator` | `ask_*` tool call を Subagent に委譲 |
+| `ProfiledAgent` | profile のデフォルト option を適用する Subagent |
+| `DenyConfirmationHandler` | 確認対象の呼び出しをすべて拒否する confirmation handler |
 | `AgentResponse` | エージェント実行結果（同期） |
 | `AgentEvent` | ストリーミングイベント（`JsonSerializable`） |
 | `StreamEvent` | 低レベルLLMストリームイベント |

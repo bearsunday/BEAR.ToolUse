@@ -8,6 +8,7 @@ use BEAR\Resource\FactoryInterface;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
+use BEAR\ToolUse\Dispatch\DuplicateToolMappingException;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeConfirmationHandler;
@@ -20,6 +21,8 @@ use phpDocumentor\Reflection\DocBlockFactory;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
+
+use function array_map;
 
 #[CoversClass(AgentFactory::class)]
 final class AgentFactoryTest extends TestCase
@@ -192,12 +195,46 @@ final class AgentFactoryTest extends TestCase
     public function testMixedSchemes(): void
     {
         $this->factory->addResources([
-            'app://self/article',
+            'app://self/user',
             'page://self/article',
         ]);
 
-        $tools = $this->factory->getTools();
-        $this->assertCount(2, $tools);
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $this->factory->getTools());
+        $this->assertContains('article_get', $toolNames);
+        $this->assertContains('user_get', $toolNames);
+    }
+
+    public function testSameToolNameFromTwoSchemesIsRejected(): void
+    {
+        try {
+            $this->factory->addResources([
+                'app://self/article',
+                'page://self/article',
+            ]);
+            $this->fail('Expected DuplicateToolMappingException');
+        } catch (DuplicateToolMappingException $e) {
+            $this->assertStringContainsString('Tool "article_get" is already mapped to app://self/article', $e->getMessage());
+        }
+
+        // Neither the factory nor the registry is left pointing at the later URI
+        $this->assertSame([], $this->factory->getTools());
+        $mapping = $this->factory->getRegistry()->get('article_get');
+        $this->assertNotNull($mapping);
+        $this->assertSame('app://self/article', $mapping->resourceUri);
+    }
+
+    public function testFailedBatchLeavesNoToolRegistered(): void
+    {
+        $tool = new Tool('duplicated_get', 'A tool', ['type' => 'object', 'properties' => [], 'required' => []]);
+
+        try {
+            $this->factory->addTools([$tool, $tool]);
+            $this->fail('Expected DuplicateToolNameException');
+        } catch (DuplicateToolNameException $e) {
+            $this->assertStringContainsString('already registered', $e->getMessage());
+        }
+
+        $this->assertSame([], $this->factory->getTools());
     }
 
     public function testCreateStreamingAgent(): void

@@ -134,7 +134,136 @@ if ($response->completed) {
 }
 ```
 
-### 5. Conversation History
+### 5. Per-call Tool Filtering
+
+Use `AgentOptions` to limit the tools available for a single run. This does not change the collected resource registry; it only narrows the tools sent to the LLM for that invocation.
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+
+$response = $agent->run(
+    'Please search articles, but do not modify anything.',
+    AgentOptions::withTools(['article_get', 'search_get']),
+);
+```
+
+Unknown tool names fail fast, so typos or policy mistakes are detected before the LLM call.
+
+The same option is available for streaming:
+
+```php
+foreach ($agent->runStream('Search articles', AgentOptions::withTools(['search_get'])) as $event) {
+    // ...
+}
+```
+
+`resume()` / `resumeStream()` take the same option, so a run interrupted by a client tool can be continued under the same restriction (see [Client Tools](#client-tools)).
+
+### 6. Input/Output Processors
+
+Processors let you extend each LLM call without making the agent runtime larger. Input processors can rewrite the system prompt, messages, or tools before the LLM call — they may narrow the tool set they are given, never widen it, so a tool excluded by `AgentOptions` or by a subagent profile stays excluded. Output processors can inspect or rewrite the LLM response after the call. They run on every iteration, including calls after tool results.
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\InputProcessorInterface;
+use BEAR\ToolUse\Runtime\LlmRequest;
+use BEAR\ToolUse\Runtime\Message;
+
+final class MemoryProcessor implements InputProcessorInterface
+{
+    public function process(LlmRequest $request): LlmRequest
+    {
+        return $request->withMessages([
+            ...$request->messages,
+            Message::user('Known context: the user prefers concise answers.'),
+        ]);
+    }
+}
+
+$response = $agent->run(
+    'Summarize this article',
+    AgentOptions::withProcessors(inputProcessors: [new MemoryProcessor()]),
+);
+```
+
+`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents. It must return the same concrete type it receives. Text content may be rewritten, but the control data the runtime branches on must survive untouched: the stop reason and the tool calls (id, name, input) of every response, and the `tool_use` content blocks of a `tool_use` response. A processor cannot turn a text answer into a tool call, or a tool call into a different one, and a `tool_use` response must keep exactly one `tool_use` block per tool call — an added or duplicated block would reach the next request with no `tool_result` answering it. The runtime rejects all of these with `UnexpectedValueException`.
+
+You can use ALPS as runtime context with `AlpsContextInputProcessor`. It merges matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs, into the trailing user message (inside a tool loop that message carries the `tool_result` blocks, so a separate message after it would break the tool-result turn). Tool descriptors match by tool name (or its camelCase form), so an `article_get` tool needs an ALPS descriptor id such as `article_get` or `articleGet`. Tool input parameters use semantic descriptors only.
+
+```php
+use BEAR\ToolUse\Runtime\AgentOptions;
+use BEAR\ToolUse\Runtime\AlpsContextInputProcessor;
+use BEAR\ToolUse\Runtime\AlpsToolPolicyInputProcessor;
+use BEAR\ToolUse\Schema\AlpsSemanticDictionary;
+
+$alps = new AlpsSemanticDictionary(__DIR__ . '/alps/profile.json');
+
+$response = $agent->run(
+    'Find this user',
+    AgentOptions::withProcessors(inputProcessors: [
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
+You can also use ALPS transition types as a per-call tool policy. The `safeOnly()` policy exposes only tools whose matching ALPS descriptor is `safe`; tools without a matching descriptor are hidden unless you use `safeOnlyAllowingUnknownTools()`. Use `safeAndIdempotent()` when idempotent state-changing transitions are also allowed. Apply this policy after the ALPS profile covers the tools you expect, or use the allowing-unknown variant during migration. When combining policy and context processors, place the policy first so `AlpsContextInputProcessor` describes only the tools still available after filtering.
+
+```php
+$response = $agent->run(
+    'Summarize the current account state without changing it',
+    AgentOptions::withProcessors(inputProcessors: [
+        AlpsToolPolicyInputProcessor::safeOnly($alps),
+        new AlpsContextInputProcessor($alps),
+    ]),
+);
+```
+
+### 7. Agent-as-Tool / Named Subagents
+
+Register specialist agents in an `AgentPool`, then expose them as tools named `ask_{name}`. Subagent conversation history is isolated per call.
+
+```php
+use BEAR\ToolUse\Runtime\AgentDelegator;
+use BEAR\ToolUse\Runtime\AgentFactory;
+use BEAR\ToolUse\Runtime\AgentPool;
+use BEAR\ToolUse\Runtime\AgentProfile;
+
+$pool = new AgentPool($llmClient, $resourceDispatcher, $collector);
+$pool->register(new AgentProfile(
+    name: 'critic',
+    description: 'Review design risks',
+    systemPrompt: 'You are a critical reviewer.',
+    resources: ['app://self/article'],
+    maxIterations: 5,
+));
+
+$delegator = new AgentDelegator($pool, $resourceDispatcher);
+$factory = new AgentFactory($llmClient, $delegator, $collector, $registry);
+
+$agent = $factory
+    ->addResources(['app://self/article'])
+    ->addSubagents($pool)
+    ->create('You are a coordinator.');
+
+// When the LLM calls ask_critic, AgentDelegator runs the critic agent and
+// feeds the result back as a normal tool_result.
+```
+
+You can also call a subagent directly:
+
+```php
+$response = $delegator->ask('critic', 'What are the risks?', ['articleId' => 1]);
+```
+
+Subagents created by `AgentPool` deny confirmable tools by default when no `ConfirmationHandlerInterface` is configured on the pool (`DenyConfirmationHandler` is used). Pass a confirmation handler to `AgentPool` when subagents should be allowed to execute `#[Tool(confirm: true)]` resources.
+
+An `AgentProfile` can carry its own `AgentOptions`. Per-call options are merged over the profile's rather than replacing them: tool restrictions intersect, so a caller can narrow what the profile allows but never widen it, and processors chain with the profile's first.
+
+`maxIterations` bounds the subagent's own tool loop (default: 10). Each iteration is an additional LLM call on top of the coordinator's loop, so give specialists the smallest value their task needs.
+
+Tool names must be unique across everything registered on a factory. Two pools sharing an agent name throw `DuplicateToolNameException`, and two URIs whose tool names collide (`app://self/article` and `page://self/article` both yield `article_get`) throw `DuplicateToolMappingException` from `ToolRegistry` — give one of them a distinct name with `#[Tool(name: ...)]`. Registration is validated as a batch before anything is added, so a rejected batch leaves the factory and the registry as they were.
+
+### 8. Conversation History
 
 The agent maintains conversation history across multiple `run()` calls.
 
@@ -156,7 +285,9 @@ $response = $agent->run('Tell me more about this user');
 $agent->reset();
 ```
 
-### 6. Streaming Agent
+`AgentResponse::$messages` contains the conversation history snapshot when the response came from `Agent::run()`. If you call a factory such as `AgentResponse::completed($content)` directly, the history is empty unless you pass it explicitly.
+
+### 9. Streaming Agent
 
 For real-time output (SSE, WebSocket), use the streaming agent. It yields events as the LLM generates output.
 
@@ -307,7 +438,7 @@ Y → Tool executed
 N → "User cancelled this operation." → LLM: "Understood."
 ```
 
-If no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking).
+For a directly created `Agent`, if no `ConfirmationHandlerInterface` is bound, confirmable tools execute normally (no blocking). Subagents created by `AgentPool` are stricter: without a pool-level confirmation handler, confirmable subagent tool calls are cancelled by default.
 
 ### Streaming Agent Confirmation
 
@@ -361,7 +492,11 @@ The `client: true` flag is enforced automatically. Client tools must not set `co
 
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\Agent;
 use BEAR\ToolUse\Runtime\AgentResponse;
+
+// resume() is a method of Agent, not of the interface create() returns
+assert($agent instanceof Agent);
 
 $response = $agent->run('Improve the description');
 
@@ -377,11 +512,17 @@ if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
 }
 ```
 
+`resume()` and `resumeStream()` are methods of `Agent` / `StreamingAgent`, not of `AgentInterface` / `StreamingAgentInterface` (kept out for BC). `AgentFactory::create()` is typed to the interface, so type the variable you resume against the concrete class (or narrow with `instanceof`) to keep static analysis happy.
+
 ### Streaming Agent
 
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Runtime\AgentEvent;
+use BEAR\ToolUse\Runtime\StreamingAgent;
+
+// resumeStream() is a method of StreamingAgent, not of the interface
+assert($agent instanceof StreamingAgent);
 
 $results = [];
 foreach ($agent->runStream($userMessage) as $event) {
@@ -604,7 +745,7 @@ $dictionary = new AlpsSemanticDictionary('/path/to/profile.json');
 $converter = new SchemaConverter($dictionary);
 ```
 
-Both **JSON** and **XML** ALPS profiles are supported (format is detected from the file extension). The `title` or `doc` of `semantic` descriptors is used as the parameter description. Same-profile `href="#id"` references are resolved automatically; non-semantic descriptors (`safe` / `unsafe` / `idempotent`) are excluded.
+Both **JSON** and **XML** ALPS profiles are supported (format is detected from the file extension). The `title` or `doc` of `semantic` descriptors is used as the parameter description. Same-profile `href="#id"` references are resolved automatically. For parameter descriptions, non-semantic descriptors (`safe` / `unsafe` / `idempotent`) are excluded; `AlpsContextInputProcessor` can still use matching transition descriptors as runtime context.
 
 ## Parameter Description Priority
 
@@ -672,8 +813,12 @@ Errors detected by the Dispatcher:
 | `SchemaConverterInterface` | Converts resources to tool definitions |
 | `ToolCollectorInterface` | Collects and registers tools |
 | `AgentInterface` | Agent runtime |
+| `OptionAwareAgentInterface` | Agent runtime with per-run `AgentOptions` |
 | `StreamingAgentInterface` | Streaming agent runtime |
+| `OptionAwareStreamingAgentInterface` | Streaming agent runtime with per-run `AgentOptions` |
 | `ToolResultFilterInterface` | Response filter before sending to LLM |
+| `InputProcessorInterface` | Processes each LLM request before the call |
+| `OutputProcessorInterface` | Processes each LLM response or stream event after the call |
 | `ConfirmationHandlerInterface` | User confirmation for destructive tools |
 | `ToolCallObserverInterface` | Hook invoked once per tool dispatch (audit, metrics, latency) |
 
@@ -684,6 +829,16 @@ Errors detected by the Dispatcher:
 | `Agent` | Manages conversation loop with LLM |
 | `StreamingAgent` | Streaming conversation loop yielding `AgentEvent` |
 | `AgentFactory` | Builder for agents (sync and streaming) |
+| `AgentOptions` | Per-run options such as tool filtering |
+| `LlmRequest` | LLM request passed to input processors |
+| `OutputProcessorGuard` | Rejects output processors that alter tool-use control data |
+| `AlpsContextInputProcessor` | Adds relevant ALPS descriptors to each LLM request |
+| `AlpsToolPolicyInputProcessor` | Filters tools by matching ALPS transition types |
+| `AgentProfile` | Configuration for a named subagent |
+| `AgentPool` | Registry and factory for named subagents |
+| `AgentDelegator` | Dispatches `ask_*` tool calls to subagents |
+| `ProfiledAgent` | Agent that applies its profile's default options |
+| `DenyConfirmationHandler` | Confirmation handler that denies every confirmable call |
 | `AgentResponse` | Agent execution result (sync) |
 | `AgentEvent` | Streaming event (`JsonSerializable`) |
 | `StreamEvent` | Low-level LLM stream event |

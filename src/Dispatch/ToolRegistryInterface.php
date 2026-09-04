@@ -16,6 +16,8 @@ interface ToolRegistryInterface
      * @param string                                       $resourceUri Resource URI (e.g., "app://self/article" or "article")
      * @param string                                       $method      HTTP method (e.g., "get")
      * @param class-string<ToolResultFilterInterface>|null $filter      Filter class
+     *
+     * @throws DuplicateToolMappingException When the name is already mapped to a different resource.
      */
     public function register(string $toolName, string $resourceUri, string $method, string|null $filter = null): void;
 

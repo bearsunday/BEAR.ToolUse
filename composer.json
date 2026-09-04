@@ -47,7 +47,12 @@
         "test": "phpunit",
         "cs": "vendor/bin/phpcs",
         "cs-fix": "vendor/bin/phpcbf",
-        "sa": "vendor/bin/psalm --show-info=true",
+        "phpstan": "vendor/bin/phpstan analyse -c phpstan.neon --no-progress --no-interaction --memory-limit=512M",
+        "psalm": "php -d memory_limit=512M vendor/bin/psalm --show-info=true",
+        "sa": [
+            "@phpstan",
+            "@psalm"
+        ],
         "phpmd": "vendor/bin/phpmd src text phpmd.xml",
         "tests": [
             "@cs",
@@ -61,6 +66,8 @@
         "test": "Run unit tests",
         "cs": "Check coding standards",
         "cs-fix": "Fix coding standards violations",
+        "phpstan": "Run PHPStan static analysis",
+        "psalm": "Run Psalm static analysis",
         "sa": "Run static analysis",
         "phpmd": "Run mess detector",
         "tests": "Run all checks (cs, sa, test)"

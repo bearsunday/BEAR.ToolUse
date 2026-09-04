@@ -30,13 +30,15 @@ use const JSON_THROW_ON_ERROR;
  * receives approval via Generator::send(bool). If send() is not called
  * (e.g. iterator_to_array), the tool is denied by default (safe default).
  */
-final class StreamingAgent implements StreamingAgentInterface
+final class StreamingAgent implements OptionAwareStreamingAgentInterface
 {
     /** @var list<Message> */
     public array $messages = [];
 
     /** @var list<ToolResult> Server-side results held while awaiting client tool execution */
     private array $pendingToolResults = [];
+
+    /** Every registered tool, used to classify client calls on resume */
     private readonly ToolList $toolList;
 
     /** @param list<Tool> $tools */
@@ -52,11 +54,13 @@ final class StreamingAgent implements StreamingAgentInterface
 
     /** @return Generator<int, AgentEvent, mixed, void> */
     #[Override]
-    public function runStream(string $userMessage): Generator
+    public function runStream(string $userMessage, AgentOptions|null $options = null): Generator
     {
+        $runTools = $this->resolveTools($options);
+
         $this->messages[] = Message::user($userMessage);
 
-        yield from $this->loop();
+        yield from $this->loop($runTools, $options);
     }
 
     /**
@@ -67,6 +71,10 @@ final class StreamingAgent implements StreamingAgentInterface
      * Validation runs eagerly at call time (not at first iteration) so the
      * consumer can reject an invalid resume before starting a response stream.
      *
+     * Not part of StreamingAgentInterface / OptionAwareStreamingAgentInterface
+     * (kept out for BC), so consumers that resume must type against this class
+     * rather than against the interface AgentFactory::createStreaming() returns.
+     *
      * @param list<ToolResult> $toolResults
      *
      * @return Generator<int, AgentEvent, mixed, void>
@@ -75,28 +83,37 @@ final class StreamingAgent implements StreamingAgentInterface
      * a server call of the interrupted turn lacks its held result, or the supplied
      * result IDs do not match the awaited client calls exactly once each.
      */
-    public function resumeStream(array $toolResults): Generator
+    public function resumeStream(array $toolResults, AgentOptions|null $options = null): Generator
     {
         ResumeValidator::validate($this->messages, $this->toolList, $this->pendingToolResults, $toolResults);
+
+        $runTools = $this->resolveTools($options);
 
         $this->messages[] = Message::toolResults([...$this->pendingToolResults, ...$toolResults]);
         $this->pendingToolResults = [];
 
-        return $this->loop();
+        return $this->loop($runTools, $options);
     }
 
-    /** @return Generator<int, AgentEvent, mixed, void> */
-    private function loop(): Generator
+    /**
+     * @param list<Tool> $runTools
+     *
+     * @return Generator<int, AgentEvent, mixed, void>
+     */
+    private function loop(array $runTools, AgentOptions|null $options): Generator
     {
         $fullText = '';
         $hadPreviousText = false;
 
         for ($i = 0; $i < $this->maxIterations; $i++) {
+            $request = $this->createRequest($runTools, $options);
             $stream = $this->client->chatStream(
-                system: $this->systemPrompt,
-                messages: $this->messages,
-                tools: $this->tools,
+                system: $request->systemPrompt,
+                messages: $request->messages,
+                tools: $request->tools,
             );
+            $stream = $this->processStream($stream, $request, $options);
+            $requestToolList = new ToolList($request->tools);
 
             $consumeGen = $this->consumeStream($stream, $hadPreviousText, $fullText);
             foreach ($consumeGen as $event) {
@@ -119,7 +136,7 @@ final class StreamingAgent implements StreamingAgentInterface
 
                 // Manual iteration keeps this generator's key sequence intact
                 // (a nested `yield from` would restart keys and break iterator_to_array())
-                $turnGen = $this->processToolUseTurn($state);
+                $turnGen = $this->processToolUseTurn($state, $requestToolList);
                 while ($turnGen->valid()) {
                     /** @var AgentEvent $currentEvent */
                     $currentEvent = $turnGen->current();
@@ -141,7 +158,9 @@ final class StreamingAgent implements StreamingAgentInterface
                 continue;
             }
 
-            // Other stop reasons (max_tokens, stop_sequence) - complete
+            // Any terminal stop reason without pending tools is returned as a completed stream.
+            $this->recordContentBlocks($state);
+
             yield AgentEvent::completed($fullText);
 
             return;
@@ -165,13 +184,16 @@ final class StreamingAgent implements StreamingAgentInterface
      * @throws JsonException When the LLM produced malformed JSON for a client tool call —
      * the input would otherwise silently degrade to an empty array and be executed as such.
      */
-    private function processToolUseTurn(StreamIterationState $state): Generator
+    private function processToolUseTurn(StreamIterationState $state, ToolList $toolList): Generator
     {
-        [$serverCalls, $clientCalls] = $this->partitionPendingToolCalls($state->pendingToolCalls);
+        [$serverCalls, $clientCalls] = $this->partitionPendingToolCalls($state->pendingToolCalls, $toolList);
+        // Decoded before any dispatch: a turn that cannot be handed to the client
+        // must not leave server-side effects behind
+        $clientInputs = $this->decodeClientInputs($clientCalls);
 
         $toolResults = [];
         if ($serverCalls !== []) {
-            $dispatchGen = $this->dispatchPendingToolCalls($serverCalls, $state->currentText);
+            $dispatchGen = $this->dispatchPendingToolCalls($serverCalls, $state->currentText, $toolList);
             while ($dispatchGen->valid()) {
                 /** @var AgentEvent $currentEvent */
                 $currentEvent = $dispatchGen->current();
@@ -188,11 +210,8 @@ final class StreamingAgent implements StreamingAgentInterface
 
         if ($clientCalls !== []) {
             $this->pendingToolResults = $toolResults;
-            foreach ($clientCalls as $pending) {
-                /** @var array<string, mixed> $input */
-                $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
-
-                yield AgentEvent::clientToolCall($pending->name, $pending->id, $input);
+            foreach ($clientCalls as $index => $pending) {
+                yield AgentEvent::clientToolCall($pending->name, $pending->id, $clientInputs[$index]);
             }
 
             return true;
@@ -204,16 +223,46 @@ final class StreamingAgent implements StreamingAgentInterface
     }
 
     /**
+     * Decode the arguments of every client tool call
+     *
+     * @param list<PendingToolCall> $clientCalls
+     *
+     * @return list<array<string, mixed>>
+     *
+     * @throws JsonException When the LLM produced malformed JSON for a client tool call —
+     * the input would otherwise silently degrade to an empty array and be executed as such.
+     */
+    private function decodeClientInputs(array $clientCalls): array
+    {
+        $inputs = [];
+        foreach ($clientCalls as $pending) {
+            /** @var array<string, mixed> $input */
+            $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+            $inputs[] = $input;
+        }
+
+        return $inputs;
+    }
+
+    /**
+     * Split pending calls into server-dispatched and client-executed ones
+     *
+     * Client-ness comes from the registered tools, not from the request: the
+     * conversation is classified the same way on resume, including a stateless
+     * resume that never saw this request. A registered client tool that this run
+     * disabled stays on the server side, where it is answered with a "not
+     * enabled" error result instead of being handed to the consumer.
+     *
      * @param list<PendingToolCall> $pendingToolCalls
      *
      * @return array{list<PendingToolCall>, list<PendingToolCall>} Server-dispatched calls and client-executed calls
      */
-    private function partitionPendingToolCalls(array $pendingToolCalls): array
+    private function partitionPendingToolCalls(array $pendingToolCalls, ToolList $toolList): array
     {
         $serverCalls = [];
         $clientCalls = [];
         foreach ($pendingToolCalls as $pending) {
-            if ($this->toolList->isClient($pending->name)) {
+            if ($this->toolList->isClient($pending->name) && $toolList->has($pending->name)) {
                 $clientCalls[] = $pending;
 
                 continue;
@@ -232,6 +281,32 @@ final class StreamingAgent implements StreamingAgentInterface
         }
 
         $this->messages[] = Message::assistant($state->contentBlocks);
+    }
+
+    /** @return list<Tool> */
+    private function resolveTools(AgentOptions|null $options): array
+    {
+        return $options?->filterTools($this->tools) ?? $this->tools;
+    }
+
+    /** @param list<Tool> $tools */
+    private function createRequest(array $tools, AgentOptions|null $options): LlmRequest
+    {
+        $request = new LlmRequest($this->systemPrompt, $this->messages, $tools);
+
+        return $options?->processRequest($request) ?? $request;
+    }
+
+    /**
+     * @param Generator<int, StreamEvent, mixed, void> $stream
+     *
+     * @return Generator<int, StreamEvent, mixed, void>
+     */
+    private function processStream(Generator $stream, LlmRequest $request, AgentOptions|null $options): Generator
+    {
+        foreach ($stream as $event) {
+            yield $options?->processStreamEvent($event, $request) ?? $event;
+        }
     }
 
     /**
@@ -262,8 +337,11 @@ final class StreamingAgent implements StreamingAgentInterface
      *
      * @return Generator<int, AgentEvent, bool, list<ToolResult>>
      */
-    private function dispatchPendingToolCalls(array $pendingToolCalls, string $currentText): Generator
-    {
+    private function dispatchPendingToolCalls(
+        array $pendingToolCalls,
+        string $currentText,
+        ToolList $toolList,
+    ): Generator {
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
             /** @var array<string, mixed> $input */
@@ -274,7 +352,15 @@ final class StreamingAgent implements StreamingAgentInterface
                 input: $input,
             );
 
-            if ($this->toolList->isConfirmable($toolCall->name)) {
+            if (! $toolList->has($toolCall->name)) {
+                $toolResults[] = ToolResult::error($toolCall->id, 'Tool is not enabled: ' . $toolCall->name);
+
+                yield AgentEvent::toolResult($pending->name);
+
+                continue;
+            }
+
+            if ($toolList->isConfirmable($toolCall->name)) {
                 /** @var bool $approved */
                 $approved = yield AgentEvent::confirmationRequired(
                     $toolCall->name,
