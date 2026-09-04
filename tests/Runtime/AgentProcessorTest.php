@@ -24,6 +24,8 @@ use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 use UnexpectedValueException;
 
+use function array_map;
+use function count;
 use function iterator_to_array;
 
 #[CoversClass(Agent::class)]
@@ -161,6 +163,94 @@ final class AgentProcessorTest extends TestCase
         $this->expectExceptionMessage('Output processor must preserve tool_use content blocks for tool calls.');
 
         $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testAgentOutputProcessorCannotAddAnUnpairedToolUseBlock(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                // Every original tool call is preserved; only the content gains a block
+                return new LlmResponse($output->stopReason, [
+                    ...$output->content,
+                    ['type' => 'tool_use', 'id' => 'injected', 'name' => 'article_get', 'input' => ['id' => 9]],
+                ], $output->toolCalls);
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve tool_use content blocks for tool calls.');
+
+        $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testAgentOutputProcessorCannotDuplicateAToolUseBlock(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgent($llmClient);
+        $processor = new class implements OutputProcessorInterface {
+            #[Override]
+            public function process(LlmResponse|StreamEvent $output, LlmRequest $request): LlmResponse|StreamEvent
+            {
+                if (! $output instanceof LlmResponse) {
+                    return $output;
+                }
+
+                return new LlmResponse($output->stopReason, [...$output->content, ...$output->content], $output->toolCalls);
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Output processor must preserve tool_use content blocks for tool calls.');
+
+        $agent->run('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor]));
+    }
+
+    public function testInputProcessorCannotWidenThePerCallToolSet(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $agent = $this->createAgentWithArticleAndErrorTools($llmClient);
+        $processor = new class implements InputProcessorInterface {
+            #[Override]
+            public function process(LlmRequest $request): LlmRequest
+            {
+                return $request->withTools([
+                    ...$request->tools,
+                    new Tool('article_get', 'Get an article', [
+                        'type' => 'object',
+                        'properties' => ['id' => ['type' => 'integer']],
+                        'required' => ['id'],
+                    ]),
+                ]);
+            }
+        };
+
+        $llmClient->queueToolUseResponse('call_1', 'article_get', ['id' => 1]);
+        $llmClient->queueTextResponse('Done.');
+
+        // article_get is registered but excluded for this run; the processor adds it back
+        $agent->run('Get article 1', AgentOptions::withProcessors(
+            inputProcessors: [$processor],
+            enabledTools: ['error_get'],
+        ));
+
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $llmClient->calls[0]['tools']);
+        $this->assertSame(['error_get'], $toolNames);
+        $messages = $llmClient->calls[1]['messages'];
+        $toolResultMessage = $messages[count($messages) - 1];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: article_get', $toolResultMessage->content[0]['content']);
     }
 
     public function testAgentOutputProcessorMustPreserveToolUseStopReason(): void

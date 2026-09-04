@@ -8,6 +8,7 @@ use BEAR\Resource\FactoryInterface;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
+use BEAR\ToolUse\Dispatch\DuplicateToolMappingException;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeConfirmationHandler;
@@ -205,13 +206,35 @@ final class AgentFactoryTest extends TestCase
 
     public function testSameToolNameFromTwoSchemesIsRejected(): void
     {
-        $this->expectException(DuplicateToolNameException::class);
-        $this->expectExceptionMessage('Tool "article_get" is already registered.');
+        try {
+            $this->factory->addResources([
+                'app://self/article',
+                'page://self/article',
+            ]);
+            $this->fail('Expected DuplicateToolMappingException');
+        } catch (DuplicateToolMappingException $e) {
+            $this->assertStringContainsString('Tool "article_get" is already mapped to app://self/article', $e->getMessage());
+        }
 
-        $this->factory->addResources([
-            'app://self/article',
-            'page://self/article',
-        ]);
+        // Neither the factory nor the registry is left pointing at the later URI
+        $this->assertSame([], $this->factory->getTools());
+        $mapping = $this->factory->getRegistry()->get('article_get');
+        $this->assertNotNull($mapping);
+        $this->assertSame('app://self/article', $mapping->resourceUri);
+    }
+
+    public function testFailedBatchLeavesNoToolRegistered(): void
+    {
+        $tool = new Tool('duplicated_get', 'A tool', ['type' => 'object', 'properties' => [], 'required' => []]);
+
+        try {
+            $this->factory->addTools([$tool, $tool]);
+            $this->fail('Expected DuplicateToolNameException');
+        } catch (DuplicateToolNameException $e) {
+            $this->assertStringContainsString('already registered', $e->getMessage());
+        }
+
+        $this->assertSame([], $this->factory->getTools());
     }
 
     public function testCreateStreamingAgent(): void

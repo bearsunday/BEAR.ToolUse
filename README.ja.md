@@ -161,7 +161,7 @@ foreach ($agent->runStream('記事を検索して', AgentOptions::withTools(['se
 
 ### 6. Input/Output Processor
 
-Processor を使うと、Agent runtime を肥大化させずに各 LLM 呼び出しを拡張できます。Input Processor は LLM 呼び出し前に system prompt、messages、tools を加工できます。Output Processor は LLM 呼び出し後の response を検査・正規化できます。tool result 後の再問い合わせを含め、各 iteration で毎回適用されます。
+Processor を使うと、Agent runtime を肥大化させずに各 LLM 呼び出しを拡張できます。Input Processor は LLM 呼び出し前に system prompt、messages、tools を加工できます。tools は渡された集合を狭められますが広げられません。`AgentOptions` や subagent profile で除外された tool は除外のままです。Output Processor は LLM 呼び出し後の response を検査・正規化できます。tool result 後の再問い合わせを含め、各 iteration で毎回適用されます。
 
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
@@ -186,7 +186,7 @@ $response = $agent->run(
 );
 ```
 
-`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。受け取ったものと同じ具体型を返す必要があります。text content は書き換えられますが、runtime が分岐に使う制御データはそのまま保持してください。対象は全 response の stop reason と tool call（id・name・input）、および `tool_use` response の `tool_use` content block です。text 応答を tool call に変えることも、別の tool call に差し替えることもできません（`UnexpectedValueException` になります）。
+`OutputProcessorInterface` は通常の Agent では `LlmResponse`、Streaming Agent では `StreamEvent` を受け取ります。受け取ったものと同じ具体型を返す必要があります。text content は書き換えられますが、runtime が分岐に使う制御データはそのまま保持してください。対象は全 response の stop reason と tool call（id・name・input）、および `tool_use` response の `tool_use` content block です。text 応答を tool call に変えることも、別の tool call に差し替えることもできません。`tool_use` response では tool call 1件につき `tool_use` block をちょうど1件保持する必要もあります（追加・重複した block は、対応する `tool_result` を持たないまま次のリクエストに乗るためです）。いずれも `UnexpectedValueException` になります。
 
 `AlpsContextInputProcessor` を使うと、ALPS を runtime context として注入できます。現在の LLM 呼び出しで利用可能な tool に一致する `safe` / `unsafe` などの transition descriptor と、tool input に一致する semantic descriptor を、末尾の user メッセージにマージします（tool ループ中はそのメッセージが `tool_result` block を持つため、後ろに別メッセージを足すと tool-result ターンが壊れます）。tool descriptor は tool 名（または camelCase 形）で照合されるため、`article_get` tool には `article_get` または `articleGet` のような ALPS descriptor id が必要です。tool input parameter は semantic descriptor のみを参照します。
 
@@ -261,7 +261,7 @@ $response = $delegator->ask('critic', 'この設計のリスクは？', ['articl
 
 `maxIterations` は Subagent 自身の tool ループの上限です（デフォルト 10）。反復のたびに coordinator のループとは別に LLM 呼び出しが 1 回増えるため、専門 Subagent にはその役割に必要な最小値を設定してください。
 
-tool 名は factory に登録するすべてで一意である必要があります。同じ resource の二重登録、同名 agent を持つ複数 pool、同じパスの別スキーム URI（`app://self/article` と `page://self/article`）は `DuplicateToolNameException` になります。`#[Tool(name: ...)]` でどちらかに別名を付けてください。
+tool 名は factory に登録するすべてで一意である必要があります。同名 agent を持つ複数 pool は `DuplicateToolNameException`、tool 名が衝突する URI 同士（`app://self/article` と `page://self/article` はどちらも `article_get` になります）は `ToolRegistry` から `DuplicateToolMappingException` になります。`#[Tool(name: ...)]` でどちらかに別名を付けてください。登録はバッチ単位で検証してから反映するため、弾かれたバッチは factory と registry のどちらにも痕跡を残しません。
 
 ### 8. 会話履歴
 
@@ -492,7 +492,11 @@ $agent = $agentFactory
 
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\Agent;
 use BEAR\ToolUse\Runtime\AgentResponse;
+
+// resume() は create() が返すインターフェイスではなく Agent のメソッド
+assert($agent instanceof Agent);
 
 $response = $agent->run('descriptionを改善して');
 
@@ -515,6 +519,10 @@ if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Runtime\AgentEvent;
+use BEAR\ToolUse\Runtime\StreamingAgent;
+
+// resumeStream() はインターフェイスではなく StreamingAgent のメソッド
+assert($agent instanceof StreamingAgent);
 
 $results = [];
 foreach ($agent->runStream($userMessage) as $event) {

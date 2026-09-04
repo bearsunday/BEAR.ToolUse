@@ -161,7 +161,7 @@ foreach ($agent->runStream('Search articles', AgentOptions::withTools(['search_g
 
 ### 6. Input/Output Processors
 
-Processors let you extend each LLM call without making the agent runtime larger. Input processors can rewrite the system prompt, messages, or tools before the LLM call. Output processors can inspect or rewrite the LLM response after the call. They run on every iteration, including calls after tool results.
+Processors let you extend each LLM call without making the agent runtime larger. Input processors can rewrite the system prompt, messages, or tools before the LLM call — they may narrow the tool set they are given, never widen it, so a tool excluded by `AgentOptions` or by a subagent profile stays excluded. Output processors can inspect or rewrite the LLM response after the call. They run on every iteration, including calls after tool results.
 
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
@@ -186,7 +186,7 @@ $response = $agent->run(
 );
 ```
 
-`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents. It must return the same concrete type it receives. Text content may be rewritten, but the control data the runtime branches on must survive untouched: the stop reason and the tool calls (id, name, input) of every response, and the `tool_use` content blocks of a `tool_use` response. A processor cannot turn a text answer into a tool call, or a tool call into a different one — the runtime rejects it with `UnexpectedValueException`.
+`OutputProcessorInterface` receives `LlmResponse` for normal agents and `StreamEvent` for streaming agents. It must return the same concrete type it receives. Text content may be rewritten, but the control data the runtime branches on must survive untouched: the stop reason and the tool calls (id, name, input) of every response, and the `tool_use` content blocks of a `tool_use` response. A processor cannot turn a text answer into a tool call, or a tool call into a different one, and a `tool_use` response must keep exactly one `tool_use` block per tool call — an added or duplicated block would reach the next request with no `tool_result` answering it. The runtime rejects all of these with `UnexpectedValueException`.
 
 You can use ALPS as runtime context with `AlpsContextInputProcessor`. It merges matching tool descriptors such as `safe` or `unsafe` transitions, plus matching semantic descriptors for tool inputs, into the trailing user message (inside a tool loop that message carries the `tool_result` blocks, so a separate message after it would break the tool-result turn). Tool descriptors match by tool name (or its camelCase form), so an `article_get` tool needs an ALPS descriptor id such as `article_get` or `articleGet`. Tool input parameters use semantic descriptors only.
 
@@ -261,7 +261,7 @@ An `AgentProfile` can carry its own `AgentOptions`. Per-call options are merged 
 
 `maxIterations` bounds the subagent's own tool loop (default: 10). Each iteration is an additional LLM call on top of the coordinator's loop, so give specialists the smallest value their task needs.
 
-Tool names must be unique across everything registered on a factory. Adding the same resource twice, two pools sharing an agent name, or two URIs with the same path (`app://self/article` and `page://self/article`) throws `DuplicateToolNameException` — give one of them a distinct name with `#[Tool(name: ...)]`.
+Tool names must be unique across everything registered on a factory. Two pools sharing an agent name throw `DuplicateToolNameException`, and two URIs whose tool names collide (`app://self/article` and `page://self/article` both yield `article_get`) throw `DuplicateToolMappingException` from `ToolRegistry` — give one of them a distinct name with `#[Tool(name: ...)]`. Registration is validated as a batch before anything is added, so a rejected batch leaves the factory and the registry as they were.
 
 ### 8. Conversation History
 
@@ -492,7 +492,11 @@ The `client: true` flag is enforced automatically. Client tools must not set `co
 
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
+use BEAR\ToolUse\Runtime\Agent;
 use BEAR\ToolUse\Runtime\AgentResponse;
+
+// resume() is a method of Agent, not of the interface create() returns
+assert($agent instanceof Agent);
 
 $response = $agent->run('Improve the description');
 
@@ -515,6 +519,10 @@ if ($response->stopReason === AgentResponse::STOP_CLIENT_TOOL_USE) {
 ```php
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Runtime\AgentEvent;
+use BEAR\ToolUse\Runtime\StreamingAgent;
+
+// resumeStream() is a method of StreamingAgent, not of the interface
+assert($agent instanceof StreamingAgent);
 
 $results = [];
 foreach ($agent->runStream($userMessage) as $event) {

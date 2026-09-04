@@ -186,15 +186,17 @@ final class AgentClientToolTest extends TestCase
         $this->llmClient->queueToolUseResponse('call_1', 'ui_pick', ['value' => 'x']);
         $this->llmClient->queueTextResponse('Done.');
 
-        // Unregistered tools are never client tools: the run stays server-side so
-        // the conversation is classified the same way on resume
+        // A processor cannot widen the resolved tool set, so ui_pick never reaches
+        // the request and a call to it is not a client hand-off either
         $response = $this->agent->run('Pick a value', AgentOptions::withProcessors([$processor]));
 
         $this->assertTrue($response->completed);
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $this->llmClient->calls[0]['tools']);
+        $this->assertNotContains('ui_pick', $toolNames);
         $messages = $this->llmClient->calls[1]['messages'];
         $toolResultMessage = $messages[count($messages) - 1];
         $this->assertTrue($toolResultMessage->content[0]['is_error']);
-        $this->assertSame('Unknown tool: ui_pick', $toolResultMessage->content[0]['content']);
+        $this->assertSame('Tool is not enabled: ui_pick', $toolResultMessage->content[0]['content']);
     }
 
     public function testResumeAfterResetIsRejected(): void

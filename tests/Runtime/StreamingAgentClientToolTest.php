@@ -7,13 +7,16 @@ namespace BEAR\ToolUse\Runtime;
 use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
+use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
 use JsonException;
+use Override;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
@@ -44,26 +47,10 @@ final class StreamingAgentClientToolTest extends TestCase
         $registry->register('article_get', 'app://self/article', 'get');
         $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
 
-        $tools = [
-            new Tool('article_get', 'Get an article', [
-                'type' => 'object',
-                'properties' => ['id' => ['type' => 'integer']],
-                'required' => ['id'],
-            ]),
-            new Tool('ui_update', 'Update a form field on the client', [
-                'type' => 'object',
-                'properties' => [
-                    'field' => ['type' => 'string'],
-                    'value' => ['type' => 'string'],
-                ],
-                'required' => ['field', 'value'],
-            ], client: true),
-        ];
-
         $this->agent = new StreamingAgent(
             client: $this->llmClient,
             dispatcher: $dispatcher,
-            tools: $tools,
+            tools: $this->tools(),
             systemPrompt: 'You are a helpful assistant.',
             maxIterations: 5,
         );
@@ -267,6 +254,47 @@ final class StreamingAgentClientToolTest extends TestCase
         iterator_to_array($this->agent->runStream('Update the title'));
     }
 
+    public function testMalformedClientInputAbortsBeforeAnyServerDispatch(): void
+    {
+        $dispatcher = new class implements DispatcherInterface {
+            public int $dispatched = 0;
+
+            #[Override]
+            public function dispatch(ToolCall $toolCall): ToolResult
+            {
+                $this->dispatched++;
+
+                return ToolResult::success($toolCall->id, 'dispatched');
+            }
+        };
+        $agent = new StreamingAgent(
+            client: $this->llmClient,
+            dispatcher: $dispatcher,
+            tools: $this->tools(),
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_server', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"id":1}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_client', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"field":']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        try {
+            iterator_to_array($agent->runStream('Get article 1 and update the title'));
+            $this->fail('Expected JsonException');
+        } catch (JsonException) {
+            // A turn that cannot be handed to the client leaves no server-side effect
+            $this->assertSame(0, $dispatcher->dispatched);
+        }
+    }
+
     public function testStatelessResumeStreamOnFreshAgent(): void
     {
         // A consumer resuming across HTTP requests reconstructs the
@@ -291,5 +319,25 @@ final class StreamingAgentClientToolTest extends TestCase
         $lastEvent = end($events);
         $this->assertSame(AgentEvent::COMPLETED, $lastEvent->type);
         $this->assertSame('The title has been updated.', $lastEvent->data['fullText']);
+    }
+
+    /** @return list<Tool> */
+    private function tools(): array
+    {
+        return [
+            new Tool('article_get', 'Get an article', [
+                'type' => 'object',
+                'properties' => ['id' => ['type' => 'integer']],
+                'required' => ['id'],
+            ]),
+            new Tool('ui_update', 'Update a form field on the client', [
+                'type' => 'object',
+                'properties' => [
+                    'field' => ['type' => 'string'],
+                    'value' => ['type' => 'string'],
+                ],
+                'required' => ['field', 'value'],
+            ], client: true),
+        ];
     }
 }

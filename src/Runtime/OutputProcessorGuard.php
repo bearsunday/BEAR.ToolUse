@@ -87,10 +87,16 @@ final readonly class OutputProcessorGuard
             return;
         }
 
-        $toolUseBlocks = $this->toolUseBlocksById($output);
+        // Paired by position, so an added, duplicated or dropped block is caught
+        // as well as a rewritten one. An unpaired tool_use block would reach the
+        // next request as an assistant call with no tool_result answering it.
+        $toolUseBlocks = $this->toolUseBlocks($output);
+        if (count($toolUseBlocks) !== count($input->toolCalls)) {
+            throw new UnexpectedValueException('Output processor must preserve tool_use content blocks for tool calls.');
+        }
 
-        foreach ($input->toolCalls as $toolCall) {
-            if ($this->toolUseBlockMatchesToolCall($toolUseBlocks[$toolCall->id] ?? null, $toolCall)) {
+        foreach ($input->toolCalls as $index => $toolCall) {
+            if ($this->toolUseBlockMatchesToolCall($toolUseBlocks[$index] ?? null, $toolCall)) {
                 continue;
             }
 
@@ -98,16 +104,16 @@ final readonly class OutputProcessorGuard
         }
     }
 
-    /** @return array<string, ContentBlock> */
-    private function toolUseBlocksById(LlmResponse $response): array
+    /** @return list<ContentBlock> */
+    private function toolUseBlocks(LlmResponse $response): array
     {
         $toolUseBlocks = [];
         foreach ($response->content as $block) {
-            if ($block['type'] !== 'tool_use' || ! isset($block['id'])) {
+            if ($block['type'] !== 'tool_use') {
                 continue;
             }
 
-            $toolUseBlocks[$block['id']] = $block;
+            $toolUseBlocks[] = $block;
         }
 
         return $toolUseBlocks;
@@ -117,6 +123,7 @@ final readonly class OutputProcessorGuard
     private function toolUseBlockMatchesToolCall(array|null $block, ToolCall $toolCall): bool
     {
         return $block !== null
+            && ($block['id'] ?? null) === $toolCall->id
             && ($block['name'] ?? null) === $toolCall->name
             && ($block['input'] ?? null) === $toolCall->input;
     }

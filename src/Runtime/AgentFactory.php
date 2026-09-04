@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
+use BEAR\ToolUse\Dispatch\DuplicateToolMappingException;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use BEAR\ToolUse\Llm\LlmClientInterface;
 use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
@@ -41,7 +42,8 @@ final class AgentFactory
      *
      * @return $this
      *
-     * @throws DuplicateToolNameException When a collected tool name is already registered as a client tool.
+     * @throws DuplicateToolMappingException When two URIs map the same tool name to different resources.
+     * @throws DuplicateToolNameException When a collected tool name is already registered.
      */
     public function addResources(array $uris): self
     {
@@ -68,6 +70,8 @@ final class AgentFactory
      */
     public function addTools(array $tools): self
     {
+        // Validated as a batch before anything is added: a partly applied batch
+        // would leave the factory exposing tools its caller believes it rejected
         $registeredNames = $this->registeredToolNames();
         foreach ($tools as $tool) {
             // A server tool named like a client tool would be classified as
@@ -86,8 +90,9 @@ final class AgentFactory
             }
 
             $registeredNames[$tool->name] = true;
-            $this->tools[] = $tool;
         }
+
+        $this->tools = [...$this->tools, ...$tools];
 
         return $this;
     }
@@ -129,7 +134,9 @@ final class AgentFactory
      */
     public function addClientTools(array $tools): self
     {
+        // Validated as a batch before anything is added, like addTools()
         $registeredNames = $this->registeredToolNames();
+        $clientTools = [];
         foreach ($tools as $tool) {
             if ($tool->confirm) {
                 throw new ConfirmableClientToolException(sprintf(
@@ -142,10 +149,8 @@ final class AgentFactory
                 throw new DuplicateToolNameException(sprintf('Tool "%s" is already registered', $tool->name));
             }
 
-            $registeredNames[$tool->name]      = true;
-            $this->clientToolNames[$tool->name] = true;
-
-            $this->tools[] = $tool->client ? $tool : new Tool(
+            $registeredNames[$tool->name] = true;
+            $clientTools[] = $tool->client ? $tool : new Tool(
                 name: $tool->name,
                 description: $tool->description,
                 inputSchema: $tool->inputSchema,
@@ -154,6 +159,12 @@ final class AgentFactory
                 client: true,
             );
         }
+
+        foreach ($clientTools as $clientTool) {
+            $this->clientToolNames[$clientTool->name] = true;
+        }
+
+        $this->tools = [...$this->tools, ...$clientTools];
 
         return $this;
     }

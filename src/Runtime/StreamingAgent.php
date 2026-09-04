@@ -187,6 +187,9 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
     private function processToolUseTurn(StreamIterationState $state, ToolList $toolList): Generator
     {
         [$serverCalls, $clientCalls] = $this->partitionPendingToolCalls($state->pendingToolCalls, $toolList);
+        // Decoded before any dispatch: a turn that cannot be handed to the client
+        // must not leave server-side effects behind
+        $clientInputs = $this->decodeClientInputs($clientCalls);
 
         $toolResults = [];
         if ($serverCalls !== []) {
@@ -207,11 +210,8 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
 
         if ($clientCalls !== []) {
             $this->pendingToolResults = $toolResults;
-            foreach ($clientCalls as $pending) {
-                /** @var array<string, mixed> $input */
-                $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
-
-                yield AgentEvent::clientToolCall($pending->name, $pending->id, $input);
+            foreach ($clientCalls as $index => $pending) {
+                yield AgentEvent::clientToolCall($pending->name, $pending->id, $clientInputs[$index]);
             }
 
             return true;
@@ -220,6 +220,28 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
         $this->messages[] = Message::toolResults($toolResults);
 
         return false;
+    }
+
+    /**
+     * Decode the arguments of every client tool call
+     *
+     * @param list<PendingToolCall> $clientCalls
+     *
+     * @return list<array<string, mixed>>
+     *
+     * @throws JsonException When the LLM produced malformed JSON for a client tool call —
+     * the input would otherwise silently degrade to an empty array and be executed as such.
+     */
+    private function decodeClientInputs(array $clientCalls): array
+    {
+        $inputs = [];
+        foreach ($clientCalls as $pending) {
+            /** @var array<string, mixed> $input */
+            $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+            $inputs[] = $input;
+        }
+
+        return $inputs;
     }
 
     /**

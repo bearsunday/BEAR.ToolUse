@@ -138,13 +138,45 @@ final readonly class AgentOptions
         return $filteredTools;
     }
 
+    /**
+     * Run the input processors, keeping the tools they were given authoritative
+     *
+     * Processors may narrow a request's tool set, never widen it: an added tool
+     * would escape both per-call filtering and a subagent profile's ceiling, and
+     * a tool the agent never registered could not be dispatched anyway.
+     */
     public function processRequest(LlmRequest $request): LlmRequest
     {
+        $resolvedTools = $request->tools;
         foreach ($this->inputProcessors as $processor) {
             $request = $processor->process($request);
         }
 
-        return $request;
+        return $this->restrictToResolvedTools($request, $resolvedTools);
+    }
+
+    /** @param list<Tool> $resolvedTools */
+    private function restrictToResolvedTools(LlmRequest $request, array $resolvedTools): LlmRequest
+    {
+        $resolvedNames = [];
+        foreach ($resolvedTools as $tool) {
+            $resolvedNames[$tool->name] = true;
+        }
+
+        $tools = [];
+        foreach ($request->tools as $tool) {
+            if (! isset($resolvedNames[$tool->name])) {
+                continue;
+            }
+
+            $tools[] = $tool;
+        }
+
+        if ($tools === $request->tools) {
+            return $request;
+        }
+
+        return $request->withTools($tools);
     }
 
     public function processResponse(LlmResponse $response, LlmRequest $request): LlmResponse
