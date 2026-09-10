@@ -18,8 +18,10 @@ use BEAR\ToolUse\Schema\Tool;
 use JsonException;
 use Override;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
+use UnexpectedValueException;
 
 use function array_map;
 use function count;
@@ -252,6 +254,79 @@ final class StreamingAgentClientToolTest extends TestCase
         $this->expectException(JsonException::class);
 
         iterator_to_array($this->agent->runStream('Update the title'));
+    }
+
+    /**
+     * Well-formed JSON that is not an object cannot carry named arguments:
+     * `null` would degrade to an empty input and a scalar or list to an indexed one
+     *
+     * @return array<string, array{string}>
+     */
+    public static function nonObjectClientInputProvider(): array
+    {
+        return [
+            'null' => ['null'],
+            'number' => ['42'],
+            'string' => ['"title"'],
+            'list' => ['["title"]'],
+        ];
+    }
+
+    #[DataProvider('nonObjectClientInputProvider')]
+    public function testNonObjectClientToolInputThrows(string $inputJson): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $inputJson]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Client tool "ui_update" input must be a JSON object.');
+
+        iterator_to_array($this->agent->runStream('Update the title'));
+    }
+
+    public function testEmptyObjectClientToolInputIsAccepted(): void
+    {
+        // A no-argument client tool legitimately produces `{}`
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Update the title'));
+
+        $clientCall = end($events);
+        $this->assertSame(AgentEvent::CLIENT_TOOL_CALL, $clientCall->type);
+        $this->assertSame([], $clientCall->data['input']);
+    }
+
+    public function testNestedClientToolInputStaysAnArray(): void
+    {
+        // Nested objects reach the consumer as arrays, not as decoded objects
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"field":"title","value":{"text":"New"}}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Update the title'));
+
+        $clientCall = end($events);
+        $this->assertSame(['field' => 'title', 'value' => ['text' => 'New']], $clientCall->data['input']);
     }
 
     public function testMalformedClientInputAbortsBeforeAnyServerDispatch(): void

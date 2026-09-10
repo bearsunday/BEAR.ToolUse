@@ -147,6 +147,7 @@ The agent supports user confirmation before executing destructive tool calls.
 - If no handler is bound (Agent), confirmable tools execute normally (no blocking)
 - The `confirm` property is serialized to JSON only when `true` (omitted when `false`)
 - `ToolList` provides `isConfirmable()` query — shared by both `Agent` and `StreamingAgent`
+- Confirmability is read from the **registered** `ToolList` (`$this->toolList`), never from the per-call request. An input processor may narrow the request's tool set, but a same-name replacement must not be able to drop a registered `confirm: true` flag. Enablement (`has()`) still comes from the request, where narrowing is allowed — same split as client classification
 - `ToolResult::cancelled()` encapsulates the cancellation message in the result object
 
 ## Client Tools
@@ -173,6 +174,7 @@ Tools executed by the client (browser UI, CLI) instead of being dispatched to a 
 - `resume()`/`resumeStream()` are concrete-class methods, not part of `AgentInterface`/`StreamingAgentInterface` (BC)
 - `ResumeValidator` accepts only client tool result IDs (classified via `ToolList::isClient()` from the trailing assistant message's `tool_use` block names); server results must already be held in `$pendingToolResults` — supplying them on resume is rejected. Stateless resume of a mixed turn replays the trailing assistant message with the client `tool_use` blocks only
 - Malformed client tool input JSON throws `JsonException` (`JSON_THROW_ON_ERROR`) instead of degrading to an empty array — the pre-existing lenient decodes in `dispatchPendingToolCalls()` / `StreamContentAccumulator` are out of this scope
+- Well-formed but non-object client tool input (`null`, a scalar, a non-empty list) throws `UnexpectedValueException`. `{}` and `[]` both decode to `[]` — an empty input, which a no-argument client tool legitimately produces. Decoding stays associative so nested objects reach the consumer as arrays
 
 ## Response Filtering
 

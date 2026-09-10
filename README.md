@@ -163,6 +163,8 @@ foreach ($agent->runStream('Search articles', AgentOptions::withTools(['search_g
 
 Processors let you extend each LLM call without making the agent runtime larger. Input processors can rewrite the system prompt, messages, or tools before the LLM call — they may narrow the tool set they are given, never widen it, so a tool excluded by `AgentOptions` or by a subagent profile stays excluded. Output processors can inspect or rewrite the LLM response after the call. They run on every iteration, including calls after tool results.
 
+Because they run on every iteration, an input processor that adds context must merge it into the trailing user message with `withText()` rather than appending a message of its own: inside a tool loop that trailing message carries the `tool_result` blocks, and a separate user message after it would break the tool-result turn.
+
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
 use BEAR\ToolUse\Runtime\InputProcessorInterface;
@@ -173,9 +175,16 @@ final class MemoryProcessor implements InputProcessorInterface
 {
     public function process(LlmRequest $request): LlmRequest
     {
+        $text = 'Known context: the user prefers concise answers.';
+        $messages = $request->messages;
+        $lastMessage = array_slice($messages, -1)[0] ?? null;
+        if ($lastMessage === null || $lastMessage->role !== 'user') {
+            return $request->withMessages([...$messages, Message::user($text)]);
+        }
+
         return $request->withMessages([
-            ...$request->messages,
-            Message::user('Known context: the user prefers concise answers.'),
+            ...array_slice($messages, 0, -1),
+            $lastMessage->withText($text),
         ]);
     }
 }

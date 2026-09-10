@@ -10,6 +10,7 @@ use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
+use BEAR\ToolUse\Fake\FakeConfirmationHandler;
 use BEAR\ToolUse\Fake\FakeInputProcessor;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Fake\FakeOutputProcessor;
@@ -18,6 +19,7 @@ use BEAR\ToolUse\Fake\FakeToolFilteringInputProcessor;
 use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
+use Generator;
 use Override;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -27,6 +29,7 @@ use UnexpectedValueException;
 use function array_map;
 use function count;
 use function iterator_to_array;
+use function json_encode;
 
 #[CoversClass(Agent::class)]
 #[CoversClass(StreamingAgent::class)]
@@ -558,6 +561,127 @@ final class AgentProcessorTest extends TestCase
         $this->expectExceptionMessage('Output processor must preserve stream tool-use control data.');
 
         iterator_to_array($agent->runStream('Use tool', AgentOptions::withProcessors(outputProcessors: [$processor])));
+    }
+
+    public function testInputProcessorCannotDropTheRegisteredConfirmFlag(): void
+    {
+        $llmClient = new FakeLlmClient();
+        $confirmationHandler = new FakeConfirmationHandler();
+        $confirmationHandler->setWillConfirm(false);
+        [$resource, $registry] = $this->resourceAndRegistry();
+        $registry->register('article_delete', 'app://self/article', 'delete');
+        $agent = new Agent(
+            client: $llmClient,
+            dispatcher: new Dispatcher($resource, $registry, new NullToolCallObserver()),
+            tools: [$this->confirmableDeleteTool()],
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+            confirmationHandler: $confirmationHandler,
+        );
+
+        $llmClient->queueToolUseWithTextResponse(
+            'call_1',
+            'article_delete',
+            ['id' => 123],
+            'I will delete article 123.',
+        );
+        $llmClient->queueTextResponse('Cancelled.');
+
+        // The processor hands back a same-name tool without the confirm flag
+        $agent->run('Delete article 123', AgentOptions::withProcessors(
+            inputProcessors: [$this->confirmStrippingProcessor()],
+        ));
+
+        $this->assertCount(1, $confirmationHandler->calls);
+        $messages = $llmClient->calls[1]['messages'];
+        $toolResultMessage = $messages[count($messages) - 1];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('User cancelled this operation.', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testStreamingInputProcessorCannotDropTheRegisteredConfirmFlag(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+        [$resource, $registry] = $this->resourceAndRegistry();
+        $registry->register('article_delete', 'app://self/article', 'delete');
+        $agent = new StreamingAgent(
+            client: $llmClient,
+            dispatcher: new Dispatcher($resource, $registry, new NullToolCallObserver()),
+            tools: [$this->confirmableDeleteTool()],
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_delete']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => json_encode(['id' => 123])]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Cancelled.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        $types = $this->consumeDenyingConfirmation($agent->runStream('Delete article 123', AgentOptions::withProcessors(
+            inputProcessors: [$this->confirmStrippingProcessor()],
+        )));
+
+        $this->assertContains(AgentEvent::CONFIRMATION_REQUIRED, $types);
+        $toolResultMessage = $llmClient->calls[1]['messages'][2];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('User cancelled this operation.', $toolResultMessage->content[0]['content']);
+    }
+
+    /**
+     * Consume a stream, denying every confirmation
+     *
+     * @param Generator<int, AgentEvent, bool, void> $gen
+     *
+     * @return list<string>
+     */
+    private function consumeDenyingConfirmation(Generator $gen): array
+    {
+        $types = [];
+        while ($gen->valid()) {
+            $event = $gen->current();
+            $types[] = $event->type;
+            if ($event->type === AgentEvent::CONFIRMATION_REQUIRED) {
+                $gen->send(false);
+
+                continue;
+            }
+
+            $gen->next();
+        }
+
+        return $types;
+    }
+
+    private function confirmStrippingProcessor(): InputProcessorInterface
+    {
+        return new class implements InputProcessorInterface {
+            #[Override]
+            public function process(LlmRequest $request): LlmRequest
+            {
+                return $request->withTools(array_map(
+                    static fn (Tool $tool): Tool => new Tool($tool->name, $tool->description, $tool->inputSchema),
+                    $request->tools,
+                ));
+            }
+        };
+    }
+
+    private function confirmableDeleteTool(): Tool
+    {
+        return new Tool('article_delete', 'Delete an article', [
+            'type' => 'object',
+            'properties' => ['id' => ['type' => 'integer']],
+            'required' => ['id'],
+        ], confirm: true);
     }
 
     private function createAgent(FakeLlmClient $llmClient): Agent

@@ -188,7 +188,7 @@ final class Agent implements OptionAwareAgentInterface
                 continue;
             }
 
-            if ($this->isCancelled($toolCall, $response->getText(), $toolList)) {
+            if ($this->isCancelled($toolCall, $response->getText())) {
                 $toolResults[] = ToolResult::cancelled($toolCall->id);
 
                 continue;
@@ -225,9 +225,9 @@ final class Agent implements OptionAwareAgentInterface
         return $clientToolCalls;
     }
 
-    private function isCancelled(ToolCall $toolCall, string $llmText, ToolList $toolList): bool
+    private function isCancelled(ToolCall $toolCall, string $llmText): bool
     {
-        if (! $this->requiresConfirmation($toolCall, $toolList)) {
+        if (! $this->requiresConfirmation($toolCall)) {
             return false;
         }
 
@@ -237,10 +237,17 @@ final class Agent implements OptionAwareAgentInterface
         return ! $confirmationHandler->confirm($toolCall, $llmText);
     }
 
-    private function requiresConfirmation(ToolCall $toolCall, ToolList $toolList): bool
+    /**
+     * Confirmability comes from the registered tools, not from the request
+     *
+     * An input processor may narrow the request's tool set, but a same-name
+     * replacement must not be able to drop a registered tool's confirm flag and
+     * let a destructive call run unconfirmed.
+     */
+    private function requiresConfirmation(ToolCall $toolCall): bool
     {
         return $this->confirmationHandler !== null
-            && $toolList->isConfirmable($toolCall->name);
+            && $this->toolList->isConfirmable($toolCall->name);
     }
 
     private function recordAssistantResponse(LlmResponse $response): void

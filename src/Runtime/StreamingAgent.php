@@ -14,8 +14,12 @@ use Generator;
 use JsonException;
 use Override;
 use Throwable;
+use UnexpectedValueException;
 
+use function array_is_list;
+use function is_array;
 use function json_decode;
+use function sprintf;
 
 use const JSON_THROW_ON_ERROR;
 
@@ -183,6 +187,7 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
      *
      * @throws JsonException When the LLM produced malformed JSON for a client tool call —
      * the input would otherwise silently degrade to an empty array and be executed as such.
+     * @throws UnexpectedValueException When a client tool call's input is not a JSON object.
      */
     private function processToolUseTurn(StreamIterationState $state, ToolList $toolList): Generator
     {
@@ -231,13 +236,27 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
      *
      * @throws JsonException When the LLM produced malformed JSON for a client tool call —
      * the input would otherwise silently degrade to an empty array and be executed as such.
+     * @throws UnexpectedValueException When the JSON is well-formed but not an object —
+     * a cast would turn `null` into an empty input and a scalar or list into one the
+     * client cannot read as named arguments.
      */
     private function decodeClientInputs(array $clientCalls): array
     {
         $inputs = [];
         foreach ($clientCalls as $pending) {
+            /** @var mixed $decoded */
+            $decoded = json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+            // `{}` and `[]` both decode to `[]`: an empty input, which a no-argument
+            // client tool legitimately produces. Only a non-empty list is a shape error.
+            if (! is_array($decoded) || ($decoded !== [] && array_is_list($decoded))) {
+                throw new UnexpectedValueException(sprintf(
+                    'Client tool "%s" input must be a JSON object.',
+                    $pending->name,
+                ));
+            }
+
             /** @var array<string, mixed> $input */
-            $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+            $input = $decoded;
             $inputs[] = $input;
         }
 
@@ -360,7 +379,10 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
                 continue;
             }
 
-            if ($toolList->isConfirmable($toolCall->name)) {
+            // Confirmability comes from the registered tools, not from the request:
+            // a same-name replacement from an input processor must not be able to
+            // drop the confirm flag and let a destructive call run unconfirmed.
+            if ($this->toolList->isConfirmable($toolCall->name)) {
                 /** @var bool $approved */
                 $approved = yield AgentEvent::confirmationRequired(
                     $toolCall->name,

@@ -163,6 +163,8 @@ foreach ($agent->runStream('記事を検索して', AgentOptions::withTools(['se
 
 Processor を使うと、Agent runtime を肥大化させずに各 LLM 呼び出しを拡張できます。Input Processor は LLM 呼び出し前に system prompt、messages、tools を加工できます。tools は渡された集合を狭められますが広げられません。`AgentOptions` や subagent profile で除外された tool は除外のままです。Output Processor は LLM 呼び出し後の response を検査・正規化できます。tool result 後の再問い合わせを含め、各 iteration で毎回適用されます。
 
+毎回適用されるため、context を足す Input Processor は独自のメッセージを追加するのではなく、末尾の user メッセージへ `withText()` でマージしてください。tool ループ中はその末尾メッセージが `tool_result` block を持つため、後ろに別の user メッセージを足すと tool-result ターンが壊れます。
+
 ```php
 use BEAR\ToolUse\Runtime\AgentOptions;
 use BEAR\ToolUse\Runtime\InputProcessorInterface;
@@ -173,9 +175,16 @@ final class MemoryProcessor implements InputProcessorInterface
 {
     public function process(LlmRequest $request): LlmRequest
     {
+        $text = '既知の文脈: ユーザーは簡潔な回答を好む。';
+        $messages = $request->messages;
+        $lastMessage = array_slice($messages, -1)[0] ?? null;
+        if ($lastMessage === null || $lastMessage->role !== 'user') {
+            return $request->withMessages([...$messages, Message::user($text)]);
+        }
+
         return $request->withMessages([
-            ...$request->messages,
-            Message::user('既知の文脈: ユーザーは簡潔な回答を好む。'),
+            ...array_slice($messages, 0, -1),
+            $lastMessage->withText($text),
         ]);
     }
 }
