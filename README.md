@@ -201,6 +201,39 @@ while ($gen->valid()) {
 echo "data: " . json_encode($event) . "\n\n";
 ```
 
+### Reasoning blocks (thinking-capable models)
+
+Models with extended thinking return reasoning blocks alongside text and tool
+calls, and require them to be sent back unchanged on the next request of the
+same turn. Emit them from your streaming client and the agent keeps them in the
+assistant message for you:
+
+```php
+// In your StreamingLlmClientInterface implementation
+yield new StreamEvent(StreamEvent::REASONING_DELTA, ['text' => $delta]);
+yield new StreamEvent(StreamEvent::REASONING_SIGNATURE, ['signature' => $signature]);
+yield new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP);
+
+// Safety-redacted reasoning carries opaque encrypted data instead of text
+yield new StreamEvent(StreamEvent::REASONING_REDACTED, ['data' => $data]);
+yield new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP);
+```
+
+The accumulator stores them as `['type' => 'reasoning', 'text' => ..., 'signature' => ...]`
+and `['type' => 'redacted_reasoning', 'data' => ...]` content blocks. Some
+providers withhold the reasoning text and return only a signature; the block is
+kept either way, since the signature alone is what the model needs back.
+
+Redacted reasoning keeps a block type of its own on purpose: it must round-trip
+unchanged, and folding it into a regular reasoning block would lose the
+distinction the model relies on.
+
+Reasoning is **not** emitted as an `AgentEvent`, so it never reaches SSE
+consumers by accident. Clients that do not emit these events are unaffected.
+
+For non-streaming clients, include the blocks in `LlmResponse::$content` and
+they are passed through unchanged. `LlmResponse::getText()` ignores them.
+
 ## Controlling Tool Exposure
 
 ### Exclude Specific Methods

@@ -201,6 +201,38 @@ while ($gen->valid()) {
 echo "data: " . json_encode($event) . "\n\n";
 ```
 
+### 推論ブロック（thinking 対応モデル）
+
+拡張思考を行うモデルは、テキストやツール呼び出しと並んで推論ブロックを返し、
+同じターンの次のリクエストでそれをそのまま返すことを要求します。ストリーミング
+クライアントから次のイベントを流せば、エージェントが assistant メッセージに
+保持します。
+
+```php
+// StreamingLlmClientInterface の実装内で
+yield new StreamEvent(StreamEvent::REASONING_DELTA, ['text' => $delta]);
+yield new StreamEvent(StreamEvent::REASONING_SIGNATURE, ['signature' => $signature]);
+yield new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP);
+
+// 安全上の理由で秘匿された推論は、テキストではなく暗号化データを持つ
+yield new StreamEvent(StreamEvent::REASONING_REDACTED, ['data' => $data]);
+yield new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP);
+```
+
+`['type' => 'reasoning', 'text' => ..., 'signature' => ...]` と
+`['type' => 'redacted_reasoning', 'data' => ...]` という content block として
+保持されます。プロバイダによっては推論テキストを返さず署名だけを返しますが、
+モデルが必要とするのは署名なので、その場合もブロックは保持されます。
+
+秘匿された推論を別のブロック種別にしているのは意図的です。そのまま返す必要があり、
+通常の推論ブロックに畳み込むと、モデルが依存している区別が失われます。
+
+推論は `AgentEvent` として**流しません**。SSE の購読者に意図せず届くことはありません。
+これらのイベントを流さないクライアントに影響はありません。
+
+非ストリーミングのクライアントでは、`LlmResponse::$content` にブロックを含めれば
+そのまま引き継がれます。`LlmResponse::getText()` は無視します。
+
 ## ツール公開の制御
 
 ### メソッド単位での除外
