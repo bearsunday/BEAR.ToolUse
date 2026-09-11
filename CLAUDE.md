@@ -174,7 +174,7 @@ Tools executed by the client (browser UI, CLI) instead of being dispatched to a 
 - `resume()`/`resumeStream()` are concrete-class methods, not part of `AgentInterface`/`StreamingAgentInterface` (BC)
 - `ResumeValidator` accepts only client tool result IDs (classified via `ToolList::isClient()` from the trailing assistant message's `tool_use` block names); server results must already be held in `$pendingToolResults` — supplying them on resume is rejected. Stateless resume of a mixed turn replays the trailing assistant message with the client `tool_use` blocks only
 - Malformed client tool input JSON throws `JsonException` (`JSON_THROW_ON_ERROR`) instead of degrading to an empty array — the pre-existing lenient decodes in `dispatchPendingToolCalls()` / `StreamContentAccumulator` are out of this scope
-- Well-formed but non-object client tool input (`null`, a scalar, a non-empty list) throws `UnexpectedValueException`. `{}` and `[]` both decode to `[]` — an empty input, which a no-argument client tool legitimately produces. Decoding stays associative so nested objects reach the consumer as arrays
+- Well-formed but non-object client tool input (`null`, a scalar, any list including `[]`) throws `UnexpectedValueException`. `decodeClientInputs()` decodes twice on purpose: object mode distinguishes `{}` from `[]` (associative mode gives `[]` for both), associative mode produces the value so nested objects reach the consumer as arrays
 
 ## Response Filtering
 

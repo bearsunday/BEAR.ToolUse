@@ -13,11 +13,10 @@ use BEAR\ToolUse\Schema\Tool;
 use Generator;
 use JsonException;
 use Override;
+use stdClass;
 use Throwable;
 use UnexpectedValueException;
 
-use function array_is_list;
-use function is_array;
 use function json_decode;
 use function sprintf;
 
@@ -244,11 +243,10 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
     {
         $inputs = [];
         foreach ($clientCalls as $pending) {
-            /** @var mixed $decoded */
-            $decoded = json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
-            // `{}` and `[]` both decode to `[]`: an empty input, which a no-argument
-            // client tool legitimately produces. Only a non-empty list is a shape error.
-            if (! is_array($decoded) || ($decoded !== [] && array_is_list($decoded))) {
+            // Decoded twice on purpose: object mode tells a JSON object apart from a
+            // list, which associative mode cannot (both `{}` and `[]` give `[]`), while
+            // associative mode keeps nested objects as arrays for the consumer.
+            if (! json_decode($pending->inputJson, false, 512, JSON_THROW_ON_ERROR) instanceof stdClass) {
                 throw new UnexpectedValueException(sprintf(
                     'Client tool "%s" input must be a JSON object.',
                     $pending->name,
@@ -256,7 +254,7 @@ final class StreamingAgent implements OptionAwareStreamingAgentInterface
             }
 
             /** @var array<string, mixed> $input */
-            $input = $decoded;
+            $input = json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
             $inputs[] = $input;
         }
 

@@ -258,7 +258,8 @@ final class StreamingAgentClientToolTest extends TestCase
 
     /**
      * Well-formed JSON that is not an object cannot carry named arguments:
-     * `null` would degrade to an empty input and a scalar or list to an indexed one
+     * `null` would degrade to an empty input and a scalar or list to an indexed one.
+     * `[]` is rejected too — associative decoding cannot tell it from `{}`
      *
      * @return array<string, array{string}>
      */
@@ -269,6 +270,7 @@ final class StreamingAgentClientToolTest extends TestCase
             'number' => ['42'],
             'string' => ['"title"'],
             'list' => ['["title"]'],
+            'empty list' => ['[]'],
         ];
     }
 
