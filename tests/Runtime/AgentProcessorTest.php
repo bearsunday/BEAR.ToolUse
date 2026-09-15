@@ -639,7 +639,7 @@ final class AgentProcessorTest extends TestCase
     /**
      * Consume a stream, denying every confirmation
      *
-     * @param Generator<int, AgentEvent, bool, void> $gen
+     * @param Generator<int, AgentEvent, mixed, void> $gen
      *
      * @return list<string>
      */

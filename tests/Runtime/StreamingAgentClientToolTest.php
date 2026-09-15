@@ -307,6 +307,7 @@ final class StreamingAgentClientToolTest extends TestCase
         /** @var list<AgentEvent> $events */
         $events = iterator_to_array($this->agent->runStream('Update the title'));
 
+        /** @var AgentEvent $clientCall */
         $clientCall = end($events);
         $this->assertSame(AgentEvent::CLIENT_TOOL_CALL, $clientCall->type);
         $this->assertSame([], $clientCall->data['input']);
@@ -327,6 +328,7 @@ final class StreamingAgentClientToolTest extends TestCase
         /** @var list<AgentEvent> $events */
         $events = iterator_to_array($this->agent->runStream('Update the title'));
 
+        /** @var AgentEvent $clientCall */
         $clientCall = end($events);
         $this->assertSame(['field' => 'title', 'value' => ['text' => 'New']], $clientCall->data['input']);
     }
