@@ -15,6 +15,7 @@ use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 
@@ -212,6 +213,172 @@ final class StreamingAgentTest extends TestCase
         $toolResultMessage = $llmClient->calls[1]['messages'][2];
         self::assertTrue($toolResultMessage->content[0]['is_error']);
         self::assertSame('Tool is not enabled: error_get', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testReasoningIsKeptInHistoryButNotEmitted(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::REASONING_DELTA, ['text' => 'The user wants article 123.']),
+                new StreamEvent(StreamEvent::REASONING_SIGNATURE, ['signature' => 'sig-abc']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Looking up...']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Get article 123'));
+
+        // Reasoning must not reach the caller: only the visible text and completion
+        $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
+        self::assertSame([AgentEvent::TEXT_DELTA, AgentEvent::COMPLETED], $types);
+        self::assertSame('Looking up...', $events[1]->data['fullText']);
+
+        // ...but it must survive in the history so the next request can replay it
+        $assistant = $this->agent->messages[1];
+        self::assertSame('assistant', $assistant->role);
+        self::assertSame([
+            ['type' => 'reasoning', 'text' => 'The user wants article 123.', 'signature' => 'sig-abc'],
+            ['type' => 'text', 'text' => 'Looking up...'],
+        ], $assistant->content);
+    }
+
+    public function testReasoningWithheldTextStillKeepsSignature(): void
+    {
+        // Providers may withhold the reasoning text and return only a signature
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::REASONING_SIGNATURE, ['signature' => 'sig-only']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($this->agent->runStream('Hi'));
+
+        self::assertSame([
+            ['type' => 'reasoning', 'text' => '', 'signature' => 'sig-only'],
+            ['type' => 'text', 'text' => 'Done'],
+        ], $this->agent->messages[1]->content);
+    }
+
+    public function testRedactedReasoningKeepsItsOwnBlockType(): void
+    {
+        // Safety-redacted reasoning is a distinct block carrying opaque data,
+        // not a regular reasoning block with an empty text
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::REASONING_REDACTED, ['data' => 'EncRypTedBlob==']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
+        self::assertSame([AgentEvent::TEXT_DELTA, AgentEvent::COMPLETED], $types);
+        self::assertSame([
+            ['type' => 'redacted_reasoning', 'data' => 'EncRypTedBlob=='],
+            ['type' => 'text', 'text' => 'Done'],
+        ], $this->agent->messages[1]->content);
+    }
+
+    public function testReasoningSurvivesToolResultRoundTrip(): void
+    {
+        $toolInput = json_encode(['id' => 123]);
+
+        $this->llmClient->setEventSequences([
+            // First call: reasoning, redacted reasoning, then a tool call
+            [
+                new StreamEvent(StreamEvent::REASONING_DELTA, ['text' => 'Need to look it up.']),
+                new StreamEvent(StreamEvent::REASONING_SIGNATURE, ['signature' => 'sig-1']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::REASONING_REDACTED, ['data' => 'Blob==']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            // Second call: after the tool result
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Found it!']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($this->agent->runStream('Get article 123'));
+
+        // The assistant turn that requested the tool must keep both reasoning
+        // blocks ahead of the tool_use, in the order the model produced them
+        self::assertSame([
+            ['type' => 'reasoning', 'text' => 'Need to look it up.', 'signature' => 'sig-1'],
+            ['type' => 'redacted_reasoning', 'data' => 'Blob=='],
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'article_get', 'input' => ['id' => 123]],
+        ], $this->agent->messages[1]->content);
+
+        // ...and the tool result follows it, so the next request replays both
+        self::assertSame('user', $this->agent->messages[2]->role);
+    }
+
+    /** @param list<StreamEvent> $middle */
+    #[DataProvider('blockBetweenTextProvider')]
+    public function testTextBlockDoesNotCarryOverPrecedingText(string $middleType, array $middle): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'A']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                ...$middle,
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'B']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($this->agent->runStream('Hi'));
+
+        $content = $this->agent->messages[1]->content;
+        self::assertCount(3, $content);
+        self::assertSame(['type' => 'text', 'text' => 'A'], $content[0]);
+        self::assertSame($middleType, $content[1]['type']);
+        // The trailing block must be 'B', not 'AB': each block owns only its own text
+        self::assertSame(['type' => 'text', 'text' => 'B'], $content[2]);
+    }
+
+    /** @return array<string, array{0: string, 1: list<StreamEvent>}> */
+    public static function blockBetweenTextProvider(): array
+    {
+        return [
+            'reasoning' => [
+                'reasoning',
+                [
+                    new StreamEvent(StreamEvent::REASONING_DELTA, ['text' => 'R']),
+                    new StreamEvent(StreamEvent::REASONING_SIGNATURE, ['signature' => 'sig']),
+                ],
+            ],
+            'redacted reasoning' => [
+                'redacted_reasoning',
+                [new StreamEvent(StreamEvent::REASONING_REDACTED, ['data' => 'Blob=='])],
+            ],
+            'tool use' => [
+                'tool_use',
+                [
+                    new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                    new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"id":1}']),
+                ],
+            ],
+        ];
     }
 
     public function testMaxIterationsReached(): void

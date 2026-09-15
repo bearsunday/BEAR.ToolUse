@@ -119,7 +119,7 @@ final readonly class OutputProcessorGuard
         return $toolUseBlocks;
     }
 
-    /** @param array{type: string, text?: string, id?: string, name?: string, input?: array<string, mixed>}|null $block */
+    /** @param ContentBlock|null $block */
     private function toolUseBlockMatchesToolCall(array|null $block, ToolCall $toolCall): bool
     {
         return $block !== null

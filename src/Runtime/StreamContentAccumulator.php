@@ -17,12 +17,19 @@ use function json_decode;
  */
 final class StreamContentAccumulator
 {
+    /** Text of the block being assembled; cleared at every content-block boundary */
+    private string $blockText = '';
+
+    /** Text of the whole turn; kept for the confirmation prompt and iteration state */
     private string $currentText = '';
     private bool $needsSeparator;
     private string $stopReason = 'end_turn';
     private string $currentToolId = '';
     private string $currentToolName = '';
     private string $currentToolInputJson = '';
+    private string $currentReasoning = '';
+    private string $currentReasoningSignature = '';
+    private string $currentRedactedReasoning = '';
 
     /** @var list<PendingToolCall> */
     private array $pendingToolCalls = [];
@@ -40,6 +47,9 @@ final class StreamContentAccumulator
     {
         return match ($event->type) {
             StreamEvent::TEXT_DELTA => $this->handleTextDelta($event),
+            StreamEvent::REASONING_DELTA => $this->handleReasoningDelta($event),
+            StreamEvent::REASONING_SIGNATURE => $this->handleReasoningSignature($event),
+            StreamEvent::REASONING_REDACTED => $this->handleReasoningRedacted($event),
             StreamEvent::TOOL_USE_START => $this->handleToolUseStart($event),
             StreamEvent::TOOL_USE_DELTA => $this->handleToolUseDelta($event),
             StreamEvent::CONTENT_BLOCK_STOP => $this->handleContentBlockStop(),
@@ -71,11 +81,48 @@ final class StreamContentAccumulator
             $this->needsSeparator = false;
         }
 
+        $this->blockText .= $text;
         $this->currentText .= $text;
         $this->fullText .= $text;
         $events[] = AgentEvent::textDelta($text);
 
         return $events;
+    }
+
+    /**
+     * Reasoning text is not surfaced as an AgentEvent: callers that display
+     * agent output must not leak the model's internal reasoning by default.
+     * It is kept only to be replayed to the model on the next request.
+     *
+     * @return list<AgentEvent>
+     */
+    private function handleReasoningDelta(StreamEvent $event): array
+    {
+        $this->currentReasoning .= $this->eventString($event, 'text');
+
+        return [];
+    }
+
+    /** @return list<AgentEvent> */
+    private function handleReasoningSignature(StreamEvent $event): array
+    {
+        $this->currentReasoningSignature = $this->eventString($event, 'signature');
+
+        return [];
+    }
+
+    /**
+     * Safety-redacted reasoning arrives as opaque encrypted data instead of text.
+     * It is a distinct block type that must round-trip unchanged, so it is kept
+     * apart from regular reasoning rather than folded into it.
+     *
+     * @return list<AgentEvent>
+     */
+    private function handleReasoningRedacted(StreamEvent $event): array
+    {
+        $this->currentRedactedReasoning .= $this->eventString($event, 'data');
+
+        return [];
     }
 
     /** @return list<AgentEvent> */
@@ -100,9 +147,13 @@ final class StreamContentAccumulator
     private function handleContentBlockStop(): array
     {
         $this->finalizeContentBlock();
+        $this->blockText = '';
         $this->currentToolId = '';
         $this->currentToolName = '';
         $this->currentToolInputJson = '';
+        $this->currentReasoning = '';
+        $this->currentReasoningSignature = '';
+        $this->currentRedactedReasoning = '';
 
         return [];
     }
@@ -117,6 +168,27 @@ final class StreamContentAccumulator
 
     private function finalizeContentBlock(): void
     {
+        if ($this->currentRedactedReasoning !== '') {
+            $this->contentBlocks[] = [
+                'type' => 'redacted_reasoning',
+                'data' => $this->currentRedactedReasoning,
+            ];
+
+            return;
+        }
+
+        // A reasoning block carries a signature even when its text is withheld
+        // by the provider, and the model needs both back to continue the turn
+        if ($this->currentReasoning !== '' || $this->currentReasoningSignature !== '') {
+            $this->contentBlocks[] = [
+                'type' => 'reasoning',
+                'text' => $this->currentReasoning,
+                'signature' => $this->currentReasoningSignature,
+            ];
+
+            return;
+        }
+
         if ($this->currentToolName !== '') {
             $this->pendingToolCalls[] = new PendingToolCall(
                 $this->currentToolId,
@@ -135,11 +207,11 @@ final class StreamContentAccumulator
             return;
         }
 
-        if ($this->currentText === '') {
+        if ($this->blockText === '') {
             return;
         }
 
-        $this->contentBlocks[] = ['type' => 'text', 'text' => $this->currentText];
+        $this->contentBlocks[] = ['type' => 'text', 'text' => $this->blockText];
     }
 
     private function eventString(StreamEvent $event, string $key, string $default = ''): string
