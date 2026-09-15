@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(AlpsSemanticDictionary::class)]
+#[CoversClass(AlpsDescriptorIndex::class)]
 final class AlpsSemanticDictionaryTest extends TestCase
 {
     private AlpsSemanticDictionary $dictionary;
@@ -55,8 +56,23 @@ final class AlpsSemanticDictionaryTest extends TestCase
 
     public function testNonSemanticDescriptorIsExcluded(): void
     {
-        // createUser is type=safe (transition) — must NOT appear in dictionary
-        $this->assertNull($this->dictionary->get('createUser'));
+        // goUserList is type=safe (transition) — must NOT appear in dictionary
+        $this->assertNull($this->dictionary->get('goUserList'));
+    }
+
+    public function testGetDescriptorIncludesNonSemanticDescriptor(): void
+    {
+        $descriptor = $this->dictionary->getDescriptor('goUserList');
+
+        $this->assertSame('goUserList', $descriptor['id'] ?? null);
+        $this->assertSame('safe', $descriptor['type'] ?? null);
+        $this->assertSame('Open user list transition', $descriptor['description'] ?? null);
+        $this->assertNull($descriptor['href'] ?? null);
+    }
+
+    public function testGetDescriptorForMissingId(): void
+    {
+        $this->assertNull($this->dictionary->getDescriptor('nonexistent'));
     }
 
     public function testLocalHrefResolvesToReferencedDescription(): void
@@ -82,6 +98,10 @@ final class AlpsSemanticDictionaryTest extends TestCase
     {
         // href that does not start with '#' is not resolved (cross-file ref unsupported)
         $this->assertNull($this->dictionary->get('externalRef'));
+
+        $descriptor = $this->dictionary->getDescriptor('externalRef');
+        $this->assertSame('https://example.com/profile.json#userId', $descriptor['href'] ?? null);
+        $this->assertNull($descriptor['description'] ?? null);
     }
 
     public function testLoadXmlProfile(): void
@@ -93,7 +113,7 @@ final class AlpsSemanticDictionaryTest extends TestCase
         $this->assertSame('Name of the user', $dictionary->get('userName'));
         $this->assertNull($dictionary->get('email'));
         $this->assertSame('Nested description', $dictionary->get('nestedField'));
-        $this->assertNull($dictionary->get('createUser'));
+        $this->assertNull($dictionary->get('goUserList'));
         $this->assertSame('User identifier', $dictionary->get('userIdAlias'));
         $this->assertNull($dictionary->get('danglingHref'));
         $this->assertSame('User identifier', $dictionary->get('chainA'));

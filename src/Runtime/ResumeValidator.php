@@ -118,8 +118,9 @@ final readonly class ResumeValidator
             $server[$id] = true;
         }
 
+        // A held result resolves its call, whichever side it was classified on
         foreach ($heldResults as $held) {
-            unset($server[$held->toolUseId]);
+            unset($client[$held->toolUseId], $server[$held->toolUseId]);
         }
 
         return [$client, $server];

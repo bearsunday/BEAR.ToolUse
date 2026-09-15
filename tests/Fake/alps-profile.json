@@ -36,9 +36,38 @@
         ]
       },
       {
-        "id": "createUser",
+        "id": "UserList",
+        "type": "semantic",
+        "title": "User list state"
+      },
+      {
+        "id": "User",
+        "type": "semantic",
+        "title": "User detail state"
+      },
+      {
+        "id": "goUserList",
         "type": "safe",
-        "title": "Create user transition"
+        "title": "Open user list transition",
+        "rt": "#UserList"
+      },
+      {
+        "id": "doSyncUser",
+        "type": "idempotent",
+        "title": "Synchronize user transition",
+        "rt": "#User"
+      },
+      {
+        "id": "doDeleteUser",
+        "type": "idempotent",
+        "title": "Delete user transition",
+        "rt": "#UserList"
+      },
+      {
+        "id": "doCreateUser",
+        "type": "unsafe",
+        "title": "Create user transition",
+        "rt": "#User"
       },
       {
         "id": "userIdAlias",

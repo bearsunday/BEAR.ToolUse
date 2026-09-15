@@ -14,15 +14,18 @@ use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
 use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
+use Override;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 
+use function array_map;
 use function count;
 
 #[CoversClass(Agent::class)]
 #[CoversClass(AgentResponse::class)]
 #[CoversClass(ResumeValidator::class)]
+#[CoversClass(AgentOptions::class)]
 #[CoversClass(ToolList::class)]
 final class AgentClientToolTest extends TestCase
 {
@@ -101,6 +104,20 @@ final class AgentClientToolTest extends TestCase
         $this->assertSame('call_1', $toolResultMessage->content[0]['tool_use_id']);
     }
 
+    public function testResumeAppliesPerCallToolFiltering(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+        $this->llmClient->queueTextResponse('The title has been updated.');
+        $options = AgentOptions::withTools(['ui_update']);
+
+        $this->agent->run('Update the title', $options);
+        $response = $this->agent->resume([ToolResult::success('call_1', ['applied' => true])], $options);
+
+        $this->assertTrue($response->completed);
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $this->llmClient->calls[1]['tools']);
+        $this->assertSame(['ui_update'], $toolNames);
+    }
+
     public function testMixedServerAndClientToolCallsMergeOnResume(): void
     {
         $this->llmClient->queueResponse(new LlmResponse(
@@ -133,6 +150,53 @@ final class AgentClientToolTest extends TestCase
         $this->assertSame('call_server', $toolResultMessage->content[0]['tool_use_id']);
         $this->assertFalse($toolResultMessage->content[0]['is_error']);
         $this->assertSame('call_client', $toolResultMessage->content[1]['tool_use_id']);
+    }
+
+    public function testDisabledClientToolIsAnsweredWithAnErrorInsteadOfHandedToTheClient(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+        $this->llmClient->queueTextResponse('Cannot update the editor here.');
+
+        $response = $this->agent->run('Update the title', AgentOptions::withTools(['article_get']));
+
+        $this->assertTrue($response->completed);
+        $messages = $this->llmClient->calls[1]['messages'];
+        $toolResultMessage = $messages[count($messages) - 1];
+        $this->assertSame('call_1', $toolResultMessage->content[0]['tool_use_id']);
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: ui_update', $toolResultMessage->content[0]['content']);
+    }
+
+    public function testClientToolAddedByAnInputProcessorIsNotHandedToTheClient(): void
+    {
+        $processor = new class implements InputProcessorInterface {
+            #[Override]
+            public function process(LlmRequest $request): LlmRequest
+            {
+                return $request->withTools([
+                    ...$request->tools,
+                    new Tool('ui_pick', 'Pick a value on the client', [
+                        'type' => 'object',
+                        'properties' => ['value' => ['type' => 'string']],
+                        'required' => ['value'],
+                    ], client: true),
+                ]);
+            }
+        };
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_pick', ['value' => 'x']);
+        $this->llmClient->queueTextResponse('Done.');
+
+        // A processor cannot widen the resolved tool set, so ui_pick never reaches
+        // the request and a call to it is not a client hand-off either
+        $response = $this->agent->run('Pick a value', AgentOptions::withProcessors([$processor]));
+
+        $this->assertTrue($response->completed);
+        $toolNames = array_map(static fn (Tool $tool): string => $tool->name, $this->llmClient->calls[0]['tools']);
+        $this->assertNotContains('ui_pick', $toolNames);
+        $messages = $this->llmClient->calls[1]['messages'];
+        $toolResultMessage = $messages[count($messages) - 1];
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('Tool is not enabled: ui_pick', $toolResultMessage->content[0]['content']);
     }
 
     public function testResumeAfterResetIsRejected(): void

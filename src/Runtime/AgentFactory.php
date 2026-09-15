@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
+use BEAR\ToolUse\Dispatch\DuplicateToolMappingException;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use BEAR\ToolUse\Llm\LlmClientInterface;
 use BEAR\ToolUse\Llm\StreamingLlmClientInterface;
@@ -26,7 +27,7 @@ final class AgentFactory
 
     public function __construct(
         private readonly LlmClientInterface $client,
-        private readonly DispatcherInterface $dispatcher,
+        private DispatcherInterface $dispatcher,
         private readonly ToolCollectorInterface $collector,
         private readonly ToolRegistryInterface $registry,
         private readonly ConfirmationHandlerInterface|null $confirmationHandler = null,
@@ -41,11 +42,37 @@ final class AgentFactory
      *
      * @return $this
      *
-     * @throws DuplicateToolNameException When a collected tool name is already registered as a client tool.
+     * @throws DuplicateToolMappingException When two URIs map the same tool name to different resources.
+     * @throws DuplicateToolNameException When a collected tool name is already registered.
      */
     public function addResources(array $uris): self
     {
         $tools = $this->collector->collect($uris);
+
+        return $this->addTools($tools);
+    }
+
+    /**
+     * Add already-built tools.
+     *
+     * Tool names must be unique. Duplicates would send the LLM two definitions
+     * of the same name (the same resource added twice, two subagent pools
+     * sharing an agent name, or two resource URIs with the same path such as
+     * `app://self/article` and `page://self/article`) while `ToolRegistry` maps
+     * that name to whichever was registered last. Rename one of them with
+     * `#[Tool(name: ...)]` or a distinct `AgentProfile` name.
+     *
+     * @param list<Tool> $tools
+     *
+     * @return $this
+     *
+     * @throws DuplicateToolNameException When a tool name is already registered.
+     */
+    public function addTools(array $tools): self
+    {
+        // Validated as a batch before anything is added: a partly applied batch
+        // would leave the factory exposing tools its caller believes it rejected
+        $registeredNames = $this->registeredToolNames();
         foreach ($tools as $tool) {
             // A server tool named like a client tool would be classified as
             // client by ToolList and bypass the dispatcher entirely
@@ -55,8 +82,32 @@ final class AgentFactory
                 );
             }
 
-            $this->tools[] = $tool;
+            if (isset($registeredNames[$tool->name])) {
+                throw new DuplicateToolNameException(sprintf(
+                    'Tool "%s" is already registered. Give one of them a distinct name with #[Tool(name: ...)]',
+                    $tool->name,
+                ));
+            }
+
+            $registeredNames[$tool->name] = true;
         }
+
+        $this->tools = [...$this->tools, ...$tools];
+
+        return $this;
+    }
+
+    /**
+     * Add named subagents as tools.
+     *
+     * @return $this
+     *
+     * @throws DuplicateToolNameException When a subagent tool name is already registered as a client tool.
+     */
+    public function addSubagents(AgentPool $pool): self
+    {
+        $this->addTools($pool->getTools());
+        $this->dispatcher = new AgentDelegator($pool, $this->dispatcher);
 
         return $this;
     }
@@ -83,11 +134,9 @@ final class AgentFactory
      */
     public function addClientTools(array $tools): self
     {
-        $registeredNames = [];
-        foreach ($this->tools as $registeredTool) {
-            $registeredNames[$registeredTool->name] = true;
-        }
-
+        // Validated as a batch before anything is added, like addTools()
+        $registeredNames = $this->registeredToolNames();
+        $clientTools = [];
         foreach ($tools as $tool) {
             if ($tool->confirm) {
                 throw new ConfirmableClientToolException(sprintf(
@@ -100,10 +149,8 @@ final class AgentFactory
                 throw new DuplicateToolNameException(sprintf('Tool "%s" is already registered', $tool->name));
             }
 
-            $registeredNames[$tool->name]      = true;
-            $this->clientToolNames[$tool->name] = true;
-
-            $this->tools[] = $tool->client ? $tool : new Tool(
+            $registeredNames[$tool->name] = true;
+            $clientTools[] = $tool->client ? $tool : new Tool(
                 name: $tool->name,
                 description: $tool->description,
                 inputSchema: $tool->inputSchema,
@@ -113,13 +160,19 @@ final class AgentFactory
             );
         }
 
+        foreach ($clientTools as $clientTool) {
+            $this->clientToolNames[$clientTool->name] = true;
+        }
+
+        $this->tools = [...$this->tools, ...$clientTools];
+
         return $this;
     }
 
     /**
      * Create the agent
      */
-    public function create(string $systemPrompt, int $maxIterations = 10): AgentInterface
+    public function create(string $systemPrompt, int $maxIterations = 10): OptionAwareAgentInterface
     {
         return new Agent(
             client: $this->client,
@@ -134,7 +187,7 @@ final class AgentFactory
     /**
      * Create the streaming agent
      */
-    public function createStreaming(string $systemPrompt, int $maxIterations = 10): StreamingAgentInterface
+    public function createStreaming(string $systemPrompt, int $maxIterations = 10): OptionAwareStreamingAgentInterface
     {
         if ($this->streamingClient === null) {
             throw new StreamingNotConfiguredException('StreamingLlmClientInterface is not configured');
@@ -147,6 +200,17 @@ final class AgentFactory
             systemPrompt: $systemPrompt,
             maxIterations: $maxIterations,
         );
+    }
+
+    /** @return array<string, true> */
+    private function registeredToolNames(): array
+    {
+        $registeredNames = [];
+        foreach ($this->tools as $registeredTool) {
+            $registeredNames[$registeredTool->name] = true;
+        }
+
+        return $registeredNames;
     }
 
     /**
