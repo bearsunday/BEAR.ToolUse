@@ -131,6 +131,9 @@ $response = $agent->run('ID 123のユーザー情報を教えてください');
 
 if ($response->completed) {
     echo $response->getText();
+} else {
+    // max_tokens, stop_sequence, refusal など — ターンは完了していない
+    error_log("stopped: {$response->stopReason}");
 }
 ```
 
@@ -183,6 +186,7 @@ while ($gen->valid()) {
         'tool_result'           => sendSseEvent('status', "{$event->data['toolName']}完了"),
         'confirmation_required' => sendSseEvent('confirm', json_encode($event)),
         'completed'             => sendSseEvent('done', $event->data['fullText']),
+        'incomplete'            => sendSseEvent('stopped', $event->data['stopReason']),
         'error'                 => sendSseEvent('error', $event->data['message']),
     };
     // 確認イベントの場合、Generator::send()でユーザーの応答を送信
@@ -537,6 +541,7 @@ final readonly class AuditLogObserver implements ToolCallObserverInterface
             'name' => $toolCall->name,
             'input' => $toolCall->input,
             'isError' => $result->isError,
+            'exception' => $result->throwable?->getMessage(),
             'durationMs' => $durationMs,
         ]);
     }
@@ -544,6 +549,8 @@ final readonly class AuditLogObserver implements ToolCallObserverInterface
 ```
 
 > **Note:** `$toolCall->input` や `$result->content` には、利用するリソース次第で機密情報（個人情報、認証情報、API トークンなど）が含まれる可能性があります。永続ログ・トレース・外部システムへ送る前に、該当フィールドのサニタイズ／マスキングを行ってください。
+
+`$result->throwable` にはエラー結果の原因となった例外が入ります。これは LLM には渡されないため（[エラーフィードバックループ](#エラーフィードバックループ) 参照）、原因を記録する場所は Observer になります。
 
 ### DI モジュールでバインド
 
@@ -683,13 +690,23 @@ LLMがエラーを受信し、次のアクションを決定
 LLM: 「ユーザー999は見つかりませんでした。」
 ```
 
-Dispatcherが検出するエラー:
+LLM は他のクライアントと同じようにエラー文を読み、そのままユーザーに引用することもあります。デフォルトの `ToolErrorFormatter` は HTTP の慣習に従います。クライアントエラー（4xx）は呼び出し側に向けて書かれたものなのでそのまま渡し、LLM が呼び出しを修正できるようにします。それ以外は詳細を伏せて失敗したことだけを伝えます。
 
-| エラー種別 | 例 | エラーメッセージ形式 |
+| エラー種別 | 例 | LLM が受け取る内容 |
 |-----------|---|-------------------|
-| 例外 | `ResourceNotFoundException` | `BEAR\Resource\Exception\ResourceNotFoundException: /user?id=999` |
-| ステータスコード | `$this->code = 400` | `400: {"error":"Validation failed"}` |
+| 4xx ステータス | `$this->code = 400` | `400: {"error":"Validation failed"}` |
+| 5xx ステータス | `$this->code = 500` | `500: Tool execution failed.` |
+| 4xx コードを持つ例外 | `ResourceNotFoundException` | `404: /user?id=999` |
+| その他の例外 | `PDOException` | `Tool execution failed.` |
 | 未知のツール | 未登録のツール | `Unknown tool: foo_bar` |
+
+例外そのものは [Observer](#ツール呼び出しの観測) 向けに `ToolResult::$throwable` に保持されます。開発時に生のエラーを見たい場合は `DebugToolErrorFormatter` をバインドしてください。例外クラス名とメッセージ、すべてのステータス本文を開示します：
+
+```php
+$this->bind(ToolErrorFormatterInterface::class)->to(DebugToolErrorFormatter::class);
+```
+
+その中間（ドメイン例外を独自のメッセージに対応付けるなど）が必要なら `ToolErrorFormatterInterface` を実装します。
 
 ## API
 
@@ -708,6 +725,7 @@ Dispatcherが検出するエラー:
 | `ToolResultFilterInterface` | LLM送信前のレスポンスフィルタ |
 | `ConfirmationHandlerInterface` | 破壊的ツールのユーザー確認 |
 | `ToolCallObserverInterface` | ディスパッチごとに 1 回呼ばれるフック（監査・メトリクス・レイテンシ計測） |
+| `ToolErrorFormatterInterface` | ツール失敗時に LLM が受け取るエラー文 |
 
 ### 主要クラス
 
@@ -722,6 +740,7 @@ Dispatcherが検出するエラー:
 | `Tool` | ツール定義（JSON Schema） |
 | `ToolCall` | LLMからのツール呼び出し |
 | `ToolResult` | ツール実行結果 |
+| `ToolErrorFormatter` | デフォルトのフォーマッタ。4xx は開示、それ以外は伏せる（`DebugToolErrorFormatter` は全開示） |
 | `Message` | 会話メッセージ |
 | `LlmResponse` | LLMからのレスポンス |
 

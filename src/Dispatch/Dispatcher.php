@@ -30,6 +30,7 @@ final readonly class Dispatcher implements DispatcherInterface
         private ResourceInterface $resource,
         private ToolRegistryInterface $registry,
         private ToolCallObserverInterface $observer,
+        private ToolErrorFormatterInterface $errorFormatter,
     ) {
     }
 
@@ -62,12 +63,7 @@ final readonly class Dispatcher implements DispatcherInterface
             );
 
             if ($ro->code >= self::ERROR_STATUS_THRESHOLD) {
-                $content = json_encode($ro->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
-                return ToolResult::error(
-                    $toolCall->id,
-                    sprintf('%d: %s', $ro->code, $content),
-                );
+                return ToolResult::error($toolCall->id, $this->errorFormatter->fromStatus($ro));
             }
 
             /** @var mixed $body */
@@ -82,10 +78,7 @@ final readonly class Dispatcher implements DispatcherInterface
 
             return ToolResult::success($toolCall->id, $content);
         } catch (Throwable $e) {
-            return ToolResult::error(
-                $toolCall->id,
-                sprintf('%s: %s', $e::class, $e->getMessage()),
-            );
+            return ToolResult::error($toolCall->id, $this->errorFormatter->fromThrowable($e), $e);
         }
     }
 

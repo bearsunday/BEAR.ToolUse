@@ -9,6 +9,7 @@ use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolCall;
+use BEAR\ToolUse\Dispatch\ToolErrorFormatter;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
@@ -37,7 +38,7 @@ final class AgentClientToolTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('article_get', 'app://self/article', 'get');
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $tools = [
             new Tool('article_get', 'Get an article', [

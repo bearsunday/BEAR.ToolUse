@@ -9,6 +9,7 @@ use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolErrorFormatter;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeConfirmationHandler;
 use BEAR\ToolUse\Fake\FakeLlmClient;
@@ -37,7 +38,7 @@ final class AgentFactoryTest extends TestCase
         $registry = new ToolRegistry();
         $converter = new SchemaConverter(DocBlockFactory::createInstance());
         $collector = new ToolCollector($converter, $registry, $resourceFactory);
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $this->factory = new AgentFactory($this->llmClient, $dispatcher, $collector, $registry);
     }
@@ -210,7 +211,7 @@ final class AgentFactoryTest extends TestCase
         $registry   = new ToolRegistry();
         $converter  = new SchemaConverter(DocBlockFactory::createInstance());
         $collector  = new ToolCollector($converter, $registry, $resourceFactory);
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $factory = new AgentFactory($this->llmClient, $dispatcher, $collector, $registry, null, $streamingClient);
         $factory->addResources(['app://self/article']);
@@ -238,7 +239,7 @@ final class AgentFactoryTest extends TestCase
         $registry  = new ToolRegistry();
         $converter = new SchemaConverter(DocBlockFactory::createInstance());
         $collector = new ToolCollector($converter, $registry, $resourceFactory);
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $factory = new AgentFactory($this->llmClient, $dispatcher, $collector, $registry, $confirmationHandler);
         $factory->addResources(['app://self/article']);
@@ -265,7 +266,7 @@ final class AgentFactoryTest extends TestCase
         $registry   = new ToolRegistry();
         $converter  = new SchemaConverter(DocBlockFactory::createInstance());
         $collector  = new ToolCollector($converter, $registry, $resourceFactory);
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $factory = new AgentFactory(
             $this->llmClient,

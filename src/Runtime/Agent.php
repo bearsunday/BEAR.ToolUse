@@ -111,8 +111,11 @@ final class Agent implements AgentInterface
                     return AgentResponse::stopSequenceReached($response->content, $this->messages);
 
                 default:
-                    // Unknown stop reason - treat as completed
-                    return AgentResponse::completed($response->content);
+                    // refusal, pause_turn, or a reason this loop does not know: the
+                    // turn did not finish. Keep the content and report it as such.
+                    $this->messages[] = Message::assistant($response->content);
+
+                    return AgentResponse::stopped($response->stopReason, $response->content, $this->messages);
             }
         }
 
