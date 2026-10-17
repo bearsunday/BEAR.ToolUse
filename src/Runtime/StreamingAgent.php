@@ -55,21 +55,38 @@ final class StreamingAgent implements StreamingAgentInterface
      *
      * Validation runs eagerly at call time (not at first iteration), like
      * resumeStream(), so the consumer can reject the call before starting a
-     * response stream.
+     * response stream. The user message is appended when the stream starts,
+     * so an abandoned generator leaves the conversation untouched.
      *
      * @return Generator<int, AgentEvent, mixed, void>
      *
-     * @throws InvalidResumeException When client tool calls are awaiting results;
+     * @throws InvalidResumeException When tool calls are awaiting results;
      * call resumeStream() with the results, or reset() to start a new conversation.
      */
     #[Override]
     public function runStream(string $userMessage): Generator
     {
-        ResumeValidator::assertNotAwaitingClientResults($this->messages, $this->toolList);
+        ResumeValidator::assertNoToolCallsAwaitingResults(
+            $this->messages,
+            $this->toolList,
+            $this->pendingToolResults,
+        );
+
+        return $this->stream($userMessage);
+    }
+
+    /** @return Generator<int, AgentEvent, mixed, void> */
+    private function stream(string $userMessage): Generator
+    {
+        ResumeValidator::assertNoToolCallsAwaitingResults(
+            $this->messages,
+            $this->toolList,
+            $this->pendingToolResults,
+        );
 
         $this->messages[] = Message::user($userMessage);
 
-        return $this->loop();
+        yield from $this->loop();
     }
 
     /**

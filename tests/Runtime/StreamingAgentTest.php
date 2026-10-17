@@ -465,6 +465,26 @@ final class StreamingAgentTest extends TestCase
         self::assertSame(AgentEvent::COMPLETED, $lastEvent->type);
     }
 
+    public function testAbandonedRunStreamDoesNotAppendUserMessage(): void
+    {
+        $stream = $this->agent->runStream('Abandoned');
+        self::assertCount(0, $this->agent->messages);
+
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Hello']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        self::assertSame(AgentEvent::COMPLETED, end($events)->type);
+        self::assertCount(2, $this->agent->messages);
+    }
+
     public function testConversationHistoryPreserved(): void
     {
         $this->llmClient->setEventSequences([

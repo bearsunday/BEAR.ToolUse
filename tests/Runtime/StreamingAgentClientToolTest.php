@@ -231,6 +231,19 @@ final class StreamingAgentClientToolTest extends TestCase
         $this->assertCount(1, $this->llmClient->calls);
     }
 
+    public function testRunStreamAfterIncompleteServerToolCallIsRejected(): void
+    {
+        $this->agent->messages[] = Message::user('Get article 1');
+        $this->agent->messages[] = Message::assistant([
+            ['type' => 'tool_use', 'id' => 'call_server', 'name' => 'article_get', 'input' => ['id' => 1]],
+        ]);
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('Server tool calls [call_server]');
+
+        $this->agent->runStream('Continue');
+    }
+
     public function testRunStreamAfterResetStartsNewConversation(): void
     {
         $toolInput = json_encode(['field' => 'title', 'value' => 'New']);

@@ -181,6 +181,32 @@ final class AgentClientToolTest extends TestCase
         $this->assertTrue($response->completed);
     }
 
+    public function testRunAfterIncompleteServerToolCallIsRejected(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'max_tokens',
+            content: [
+                ['type' => 'tool_use', 'id' => 'call_server', 'name' => 'article_get', 'input' => ['id' => 1]],
+            ],
+            toolCalls: [new ToolCall('call_server', 'article_get', ['id' => 1])],
+        ));
+
+        $response = $this->agent->run('Get article 1');
+        $this->assertSame(AgentResponse::STOP_MAX_TOKENS, $response->stopReason);
+
+        try {
+            $this->agent->run('Continue');
+            $this->fail('run() must be rejected while a server tool call has no result');
+        } catch (InvalidResumeException $e) {
+            $this->assertStringContainsString('Server tool calls [call_server]', $e->getMessage());
+        }
+
+        // An incomplete server call cannot be resumed; reset starts over
+        $this->agent->reset();
+        $this->llmClient->queueTextResponse('Hello.');
+        $this->assertTrue($this->agent->run('Hi')->completed);
+    }
+
     public function testRunAfterResetStartsNewConversation(): void
     {
         $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
