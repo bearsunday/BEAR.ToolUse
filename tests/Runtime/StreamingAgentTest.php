@@ -451,9 +451,62 @@ final class StreamingAgentTest extends TestCase
         self::assertTrue($toolResult['is_error']);
         self::assertSame('400: Malformed tool arguments (Syntax error): {"id": 123, ', $toolResult['content']);
 
-        // History keeps the tool_use block (the API requires an object input) paired with the error
+        // History keeps the tool_use block paired with the error. The input is
+        // an object because a PHP empty array would encode as [] rather than {}
+        self::assertEquals([
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'article_get', 'input' => (object) []],
+        ], $messages[1]->content);
+    }
+
+    public function testEmptyServerToolInputIsDispatchedAsEmptyArguments(): void
+    {
+        $llmClient = new FakeStreamingLlmClient();
+
+        $injector = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
+        $resource = $injector->getInstance(ResourceInterface::class);
+        $registry = new ToolRegistry();
+        $registry->register('index_get', 'app://self/index', 'get');
+        $agent = new StreamingAgent(
+            client: $llmClient,
+            dispatcher: new Dispatcher($resource, $registry, new NullToolCallObserver()),
+            tools: [
+                new Tool('index_get', 'Get the index', [
+                    'type' => 'object',
+                    'properties' => [],
+                ]),
+            ],
+            systemPrompt: 'You are a helpful assistant.',
+            maxIterations: 5,
+        );
+        $llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'index_get']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($agent->runStream('Get the index'));
+
+        $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
         self::assertSame([
-            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'article_get', 'input' => []],
+            AgentEvent::TOOL_START,
+            AgentEvent::TOOL_RESULT,
+            AgentEvent::TEXT_DELTA,
+            AgentEvent::COMPLETED,
+        ], $types);
+
+        // No input deltas means no arguments, not malformed JSON
+        $messages = $llmClient->calls[1]['messages'];
+        self::assertFalse($messages[2]->content[0]['is_error']);
+        self::assertEquals([
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'index_get', 'input' => (object) []],
         ], $messages[1]->content);
     }
 

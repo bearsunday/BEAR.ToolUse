@@ -15,6 +15,8 @@ use JsonException;
 use Override;
 use Throwable;
 
+use function array_is_list;
+use function is_array;
 use function json_decode;
 use function sprintf;
 
@@ -322,14 +324,23 @@ final class StreamingAgent implements StreamingAgentInterface
     /**
      * @return array<string, mixed>
      *
-     * @throws JsonException When the LLM produced malformed JSON for the tool call —
-     * the input would otherwise silently degrade to an empty array and be executed as such.
+     * @throws JsonException When the LLM produced malformed JSON, or JSON that is
+     * not an object, for the tool call — the input would otherwise silently
+     * degrade to an empty array and be executed as such.
      */
     private function decodeInput(PendingToolCall $pending): array
     {
-        /** @var array<string, mixed> $input */
-        $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+        if ($pending->inputJson === '') {
+            return [];
+        }
 
+        /** @var mixed $input */
+        $input = json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+        if (! is_array($input) || ($input !== [] && array_is_list($input))) {
+            throw new JsonException('Tool arguments must be a JSON object');
+        }
+
+        /** @var array<string, mixed> $input */
         return $input;
     }
 }

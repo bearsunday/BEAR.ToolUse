@@ -8,6 +8,8 @@ use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Types;
 use JsonException;
 
+use function array_is_list;
+use function is_array;
 use function is_string;
 use function json_decode;
 
@@ -218,23 +220,34 @@ final class StreamContentAccumulator
     /**
      * Decode the tool input for the assistant message kept in history
      *
-     * The API requires an object here, so malformed JSON is recorded as an
-     * empty input. It is not executed as such: StreamingAgent decodes the raw
-     * JSON again when dispatching and pairs this block with an error result
-     * that carries the raw text, so the model sees what it actually emitted.
+     * The API requires an object for tool_use.input, and a PHP empty array
+     * encodes as [] rather than {}. Empty, malformed, or non-object input is
+     * therefore recorded as an empty object. It is not executed as such:
+     * StreamingAgent decodes the raw JSON again when dispatching and pairs
+     * this block with an error result that carries the raw text, so the model
+     * sees what it actually emitted.
      *
-     * @return array<string, mixed>
+     * @return array<string, mixed>|object
      */
-    private function decodeToolInput(): array
+    private function decodeToolInput(): array|object
     {
-        try {
-            /** @var array<string, mixed> $input */
-            $input = (array) json_decode($this->currentToolInputJson, true, 512, JSON_THROW_ON_ERROR);
-
-            return $input;
-        } catch (JsonException) {
-            return [];
+        if ($this->currentToolInputJson === '') {
+            return (object) [];
         }
+
+        try {
+            /** @var mixed $input */
+            $input = json_decode($this->currentToolInputJson, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return (object) [];
+        }
+
+        if (! is_array($input) || ($input !== [] && array_is_list($input))) {
+            return (object) [];
+        }
+
+        /** @var array<string, mixed> $input */
+        return $input === [] ? (object) [] : $input;
     }
 
     private function eventString(StreamEvent $event, string $key, string $default = ''): string

@@ -241,6 +241,28 @@ final class StreamingAgentClientToolTest extends TestCase
         iterator_to_array($this->agent->runStream('Update the title'));
     }
 
+    public function testClientToolCallWithoutInputDeltaUsesEmptyArguments(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Update the title'));
+
+        /** @var AgentEvent $lastEvent */
+        $lastEvent = end($events);
+        $this->assertSame(AgentEvent::CLIENT_TOOL_CALL, $lastEvent->type);
+        $this->assertSame([], $lastEvent->data['input']);
+        $this->assertEquals([
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'ui_update', 'input' => (object) []],
+        ], $this->agent->messages[1]->content);
+    }
+
     public function testStatelessResumeStreamOnFreshAgent(): void
     {
         // A consumer resuming across HTTP requests reconstructs the
