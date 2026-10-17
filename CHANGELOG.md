@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.0] - Unreleased
 
 ### Fixed
+- `Agent::run()` / `StreamingAgent::runStream()` throw `InvalidResumeException` while tool calls are awaiting results — client calls, or a server call left without a result by an incomplete turn — instead of appending a user message after an unanswered `tool_use` block (a history the LLM API rejects) and orphaning the held server results. Call `resume()` / `resumeStream()` with client results, or `reset()` to start a new conversation. `runStream()` validates eagerly at call time, like `resumeStream()`, but appends the user message only when the stream starts, so an abandoned generator leaves the conversation untouched.
 - `StreamContentAccumulator` no longer carries the text of an earlier content block into a later one. A turn shaped `text` → `tool_use` → `text` stored the trailing block as the concatenation of both texts, because the only text buffer was never cleared at a block boundary. Block text and turn text are now separate buffers, so each content block owns just its own text while the confirmation prompt still receives the whole turn.
 
 ### Added

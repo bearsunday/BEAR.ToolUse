@@ -82,6 +82,45 @@ final readonly class ResumeValidator
     }
 
     /**
+     * Reject a new user message while tool calls are awaiting results
+     *
+     * The counterpart of validate() for run() / runStream(): a user message
+     * appended after an unanswered tool_use block produces a history the LLM
+     * API rejects. Client calls must be resumed with their results. A server
+     * call left without a result by an incomplete turn cannot be resumed at
+     * all, so the conversation must be reset.
+     *
+     * @param list<Message>    $messages    Conversation so far
+     * @param list<ToolResult> $heldResults Server-side results held for the interrupted turn
+     *
+     * @throws InvalidResumeException When the trailing assistant message has tool calls awaiting results.
+     */
+    public static function assertNoToolCallsAwaitingResults(
+        array $messages,
+        ToolList $toolList,
+        array $heldResults,
+    ): void {
+        [$awaited, $unresolvedServer] = self::awaitedIds($messages, $toolList, $heldResults);
+        // Checked first: a turn missing a server result cannot be resumed even
+        // when client calls are awaiting too, so advising resume() would mislead
+        if ($unresolvedServer !== []) {
+            throw new InvalidResumeException(sprintf(
+                'Server tool calls [%s] have no results. The turn did not finish;'
+                . ' call reset() before starting a new conversation',
+                implode(', ', array_keys($unresolvedServer)),
+            ));
+        }
+
+        if ($awaited !== []) {
+            throw new InvalidResumeException(sprintf(
+                'Client tool calls [%s] are awaiting results. Call resume() or resumeStream() with their results,'
+                . ' or reset() to start a new conversation',
+                implode(', ', array_keys($awaited)),
+            ));
+        }
+    }
+
+    /**
      * Partition the trailing assistant message's tool_use IDs
      *
      * @param list<Message>    $messages

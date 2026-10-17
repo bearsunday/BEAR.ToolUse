@@ -203,6 +203,76 @@ final class StreamingAgentClientToolTest extends TestCase
         $this->agent->resumeStream([ToolResult::success('call_client', 'applied')]);
     }
 
+    public function testRunStreamWhileAwaitingClientResultsIsRejected(): void
+    {
+        $toolInput = json_encode(['field' => 'title', 'value' => 'New']);
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+        ]);
+
+        iterator_to_array($this->agent->runStream('Update the title'));
+        $messageCount = count($this->agent->messages);
+
+        // The guard throws eagerly, before any stream is started
+        try {
+            $this->agent->runStream('Now update the description');
+            $this->fail('runStream() must be rejected while client tool calls are awaiting results');
+        } catch (InvalidResumeException $e) {
+            $this->assertStringContainsString('[call_1] are awaiting results', $e->getMessage());
+        }
+
+        // The conversation is untouched
+        $this->assertCount($messageCount, $this->agent->messages);
+        $this->assertCount(1, $this->llmClient->calls);
+    }
+
+    public function testRunStreamAfterIncompleteServerToolCallIsRejected(): void
+    {
+        $this->agent->messages[] = Message::user('Get article 1');
+        $this->agent->messages[] = Message::assistant([
+            ['type' => 'tool_use', 'id' => 'call_server', 'name' => 'article_get', 'input' => ['id' => 1]],
+        ]);
+
+        $this->expectException(InvalidResumeException::class);
+        $this->expectExceptionMessage('Server tool calls [call_server]');
+
+        $this->agent->runStream('Continue');
+    }
+
+    public function testRunStreamAfterResetStartsNewConversation(): void
+    {
+        $toolInput = json_encode(['field' => 'title', 'value' => 'New']);
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $toolInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Hello.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($this->agent->runStream('Update the title'));
+        $this->agent->reset();
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        /** @var AgentEvent $lastEvent */
+        $lastEvent = end($events);
+        $this->assertSame(AgentEvent::COMPLETED, $lastEvent->type);
+        $this->assertSame('Hello.', $lastEvent->data['fullText']);
+    }
+
     public function testResumeStreamWithMismatchedResultIsRejected(): void
     {
         $toolInput = json_encode(['field' => 'title', 'value' => 'New']);
