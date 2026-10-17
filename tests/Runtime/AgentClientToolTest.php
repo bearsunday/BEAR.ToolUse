@@ -160,6 +160,40 @@ final class AgentClientToolTest extends TestCase
         $this->agent->resume([ToolResult::success('call_client', 'applied')]);
     }
 
+    public function testRunWhileAwaitingClientResultsIsRejected(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+        $this->llmClient->queueTextResponse('The title has been updated.');
+
+        $this->agent->run('Update the title');
+        $messageCount = count($this->agent->messages);
+
+        try {
+            $this->agent->run('Now update the description');
+            $this->fail('run() must be rejected while client tool calls are awaiting results');
+        } catch (InvalidResumeException $e) {
+            $this->assertStringContainsString('[call_1] are awaiting results', $e->getMessage());
+        }
+
+        // The conversation is untouched, so the interrupted turn can still be resumed
+        $this->assertCount($messageCount, $this->agent->messages);
+        $response = $this->agent->resume([ToolResult::success('call_1', 'applied')]);
+        $this->assertTrue($response->completed);
+    }
+
+    public function testRunAfterResetStartsNewConversation(): void
+    {
+        $this->llmClient->queueToolUseResponse('call_1', 'ui_update', ['field' => 'title', 'value' => 'New']);
+        $this->llmClient->queueTextResponse('Hello.');
+
+        $this->agent->run('Update the title');
+        $this->agent->reset();
+        $response = $this->agent->run('Hi');
+
+        $this->assertTrue($response->completed);
+        $this->assertSame('Hello.', $response->getText());
+    }
+
     public function testResumeWithoutRunIsRejected(): void
     {
         $this->expectException(InvalidResumeException::class);

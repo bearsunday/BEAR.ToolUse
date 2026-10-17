@@ -82,6 +82,32 @@ final readonly class ResumeValidator
     }
 
     /**
+     * Reject a new user message while client tool calls are awaiting results
+     *
+     * The counterpart of validate() for run() / runStream(): a user message
+     * appended after an unanswered client tool_use block produces a history
+     * the LLM API rejects. The consumer must resume() with the results or
+     * reset() to start a new conversation.
+     *
+     * @param list<Message> $messages Conversation so far
+     *
+     * @throws InvalidResumeException When the trailing assistant message has client tool calls awaiting results.
+     */
+    public static function assertNotAwaitingClientResults(array $messages, ToolList $toolList): void
+    {
+        [$awaited] = self::awaitedIds($messages, $toolList, []);
+        if ($awaited === []) {
+            return;
+        }
+
+        throw new InvalidResumeException(sprintf(
+            'Client tool calls [%s] are awaiting results. Call resume() with their results,'
+            . ' or reset() to start a new conversation',
+            implode(', ', array_keys($awaited)),
+        ));
+    }
+
+    /**
      * Partition the trailing assistant message's tool_use IDs
      *
      * @param list<Message>    $messages

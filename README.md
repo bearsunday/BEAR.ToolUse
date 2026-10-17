@@ -451,6 +451,8 @@ LLM continues with all tool results of the turn
 
 `resume()` / `resumeStream()` throw `InvalidResumeException` unless the trailing assistant message contains client tool calls awaiting results and the supplied result IDs match those **client** calls exactly once each — no missing, extra, or duplicate IDs, and no resumption after `reset()` or a completed run. Server tool results are never accepted from resume input: they are computed server-side and held in the agent instance, so a resume that would need a server result supplied from outside is rejected. The expected IDs are derived from the conversation itself, so stateless resumption — reconstructing `$agent->messages` on a fresh instance across HTTP requests — keeps working; for a turn that mixed server and client calls, rebuild the trailing assistant message with the client `tool_use` blocks only.
 
+The reverse holds too: while client tool calls are awaiting results, `run()` / `runStream()` throw `InvalidResumeException` instead of appending a user message after an unanswered `tool_use` block — a history the LLM API rejects. To abandon the interrupted turn and start a new conversation, call `reset()` first.
+
 ### Security Considerations
 
 Client tools execute LLM-generated, untrusted input on the client. When exposing them:

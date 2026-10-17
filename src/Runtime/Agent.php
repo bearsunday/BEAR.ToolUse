@@ -45,10 +45,15 @@ final class Agent implements AgentInterface
      * Run the agent with a user message
      *
      * Note: Messages accumulate across calls. Use reset() to clear history.
+     *
+     * @throws InvalidResumeException When client tool calls are awaiting results;
+     * call resume() with the results, or reset() to start a new conversation.
      */
     #[Override]
     public function run(string $userMessage): AgentResponse
     {
+        ResumeValidator::assertNotAwaitingClientResults($this->messages, $this->toolList);
+
         $this->messages[] = Message::user($userMessage);
 
         return $this->loop();

@@ -50,13 +50,26 @@ final class StreamingAgent implements StreamingAgentInterface
         $this->toolList = new ToolList($this->tools);
     }
 
-    /** @return Generator<int, AgentEvent, mixed, void> */
+    /**
+     * Run the agent with a user message, streaming events
+     *
+     * Validation runs eagerly at call time (not at first iteration), like
+     * resumeStream(), so the consumer can reject the call before starting a
+     * response stream.
+     *
+     * @return Generator<int, AgentEvent, mixed, void>
+     *
+     * @throws InvalidResumeException When client tool calls are awaiting results;
+     * call resumeStream() with the results, or reset() to start a new conversation.
+     */
     #[Override]
     public function runStream(string $userMessage): Generator
     {
+        ResumeValidator::assertNotAwaitingClientResults($this->messages, $this->toolList);
+
         $this->messages[] = Message::user($userMessage);
 
-        yield from $this->loop();
+        return $this->loop();
     }
 
     /**
