@@ -510,6 +510,34 @@ final class StreamingAgentTest extends TestCase
         ], $messages[1]->content);
     }
 
+    public function testNonObjectServerToolInputIsFedBackAsError(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '[1, 2]']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Retrying.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        iterator_to_array($this->agent->runStream('Get article'));
+
+        // Valid JSON that is not an object is rejected like malformed JSON
+        $messages = $this->llmClient->calls[1]['messages'];
+        $toolResult = $messages[2]->content[0];
+        self::assertTrue($toolResult['is_error']);
+        self::assertSame('400: Malformed tool arguments (Tool arguments must be a JSON object): [1, 2]', $toolResult['content']);
+        self::assertEquals([
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'article_get', 'input' => (object) []],
+        ], $messages[1]->content);
+    }
+
     public function testMalformedInputSkipsConfirmation(): void
     {
         $llmClient = new FakeStreamingLlmClient();
