@@ -8,6 +8,7 @@ use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolCall;
 use BEAR\ToolUse\Dispatch\ToolErrorFormatter;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolResult;
@@ -114,6 +115,39 @@ final class AgentTest extends TestCase
         // user message + the assistant content that came with the stop
         $this->assertCount(2, $response->messages);
         $this->assertSame('assistant', $response->messages[1]->role);
+    }
+
+    public function testIncompleteTurnDropsToolUseBlock(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'max_tokens',
+            content: [
+                ['type' => 'text', 'text' => 'Partial'],
+                ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'article_get', 'input' => ['id' => 1]],
+            ],
+            toolCalls: [new ToolCall('call_1', 'article_get', ['id' => 1])],
+        ));
+
+        $response = $this->agent->run('Get article 1');
+
+        $this->assertFalse($response->completed);
+        // The tool_use block was never dispatched, so it is not kept in history
+        $this->assertCount(2, $this->agent->messages);
+        $this->assertSame([['type' => 'text', 'text' => 'Partial']], $this->agent->messages[1]->content);
+    }
+
+    public function testUnknownStopReasonWithEmptyContentDoesNotAppendMessage(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'refusal',
+            content: [],
+            toolCalls: [],
+        ));
+
+        $response = $this->agent->run('Test empty refusal');
+
+        $this->assertFalse($response->completed);
+        $this->assertCount(1, $this->agent->messages);
     }
 
     public function testToolUseWithSuccessfulDispatch(): void

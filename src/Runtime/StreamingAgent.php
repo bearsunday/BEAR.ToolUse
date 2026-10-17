@@ -15,6 +15,8 @@ use JsonException;
 use Override;
 use Throwable;
 
+use function array_filter;
+use function array_values;
 use function json_decode;
 
 use const JSON_THROW_ON_ERROR;
@@ -143,7 +145,7 @@ final class StreamingAgent implements StreamingAgentInterface
 
             // max_tokens, stop_sequence, a tool_use with no parsable call, or a
             // reason this loop does not know: the turn did not finish.
-            $this->recordContentBlocks($state);
+            $this->recordIncompleteContentBlocks($state);
 
             yield AgentEvent::incomplete($state->stopReason, $fullText);
 
@@ -235,6 +237,25 @@ final class StreamingAgent implements StreamingAgentInterface
         }
 
         $this->messages[] = Message::assistant($state->contentBlocks);
+    }
+
+    /**
+     * Keep the content of a turn that stopped before it could be finished
+     *
+     * A tool_use block is dropped: the turn did not dispatch it, so no
+     * tool_result can be paired with it and the next request would be rejected.
+     */
+    private function recordIncompleteContentBlocks(StreamIterationState $state): void
+    {
+        $blocks = array_values(array_filter(
+            $state->contentBlocks,
+            static fn (array $block): bool => $block['type'] !== 'tool_use',
+        ));
+        if ($blocks === []) {
+            return;
+        }
+
+        $this->messages[] = Message::assistant($blocks);
     }
 
     /**

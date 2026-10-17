@@ -12,6 +12,8 @@ use BEAR\ToolUse\Llm\LlmResponse;
 use BEAR\ToolUse\Schema\Tool;
 use Override;
 
+use function array_filter;
+use function array_values;
 use function assert;
 
 /**
@@ -103,7 +105,7 @@ final class Agent implements AgentInterface
                     break;
 
                 case 'max_tokens':
-                    $this->messages[] = Message::assistant($response->content);
+                    $this->recordIncompleteContent($response->content);
 
                     return AgentResponse::maxTokensReached($response->content, $this->messages);
 
@@ -113,13 +115,34 @@ final class Agent implements AgentInterface
                 default:
                     // refusal, pause_turn, or a reason this loop does not know: the
                     // turn did not finish. Keep the content and report it as such.
-                    $this->messages[] = Message::assistant($response->content);
+                    $this->recordIncompleteContent($response->content);
 
                     return AgentResponse::stopped($response->stopReason, $response->content, $this->messages);
             }
         }
 
         return AgentResponse::maxIterationsReached($this->messages);
+    }
+
+    /**
+     * Keep the text of a turn that stopped before it could be finished
+     *
+     * A tool_use block is dropped: the turn did not dispatch it, so no
+     * tool_result can be paired with it and the next request would be rejected.
+     *
+     * @param list<array<string, mixed>> $content
+     */
+    private function recordIncompleteContent(array $content): void
+    {
+        $blocks = array_values(array_filter(
+            $content,
+            static fn (array $block): bool => ($block['type'] ?? null) !== 'tool_use',
+        ));
+        if ($blocks === []) {
+            return;
+        }
+
+        $this->messages[] = Message::assistant($blocks);
     }
 
     /**

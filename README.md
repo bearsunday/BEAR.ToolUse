@@ -139,7 +139,7 @@ if ($response->completed) {
 
 ### 5. Conversation History
 
-The agent maintains conversation history across multiple `run()` calls.
+The agent maintains conversation history across multiple `run()` calls. An incomplete turn keeps its partial content, except `tool_use` blocks: they were never dispatched, and replaying one without a matching `tool_result` is rejected by the API.
 
 ```php
 // Continue conversation

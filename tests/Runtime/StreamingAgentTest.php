@@ -378,6 +378,29 @@ final class StreamingAgentTest extends TestCase
         self::assertSame('assistant', $this->agent->messages[1]->role);
     }
 
+    public function testIncompleteTurnDropsToolUseBlock(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Partial']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"id":1}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'max_tokens']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Get article 1'));
+
+        $lastEvent = end($events);
+        self::assertSame(AgentEvent::INCOMPLETE, $lastEvent->type);
+        // The tool was not dispatched, so only the text is kept
+        self::assertCount(2, $this->agent->messages);
+        self::assertSame([['type' => 'text', 'text' => 'Partial']], $this->agent->messages[1]->content);
+    }
+
     public function testUnknownStopReasonIsIncomplete(): void
     {
         $this->llmClient->setEventSequences([
