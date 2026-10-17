@@ -13,7 +13,6 @@ use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Schema\Tool;
-use JsonException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
@@ -223,10 +222,10 @@ final class StreamingAgentClientToolTest extends TestCase
         $this->agent->resumeStream([ToolResult::success('call_other', 'applied')]);
     }
 
-    public function testMalformedClientToolInputThrows(): void
+    public function testMalformedClientToolInputIsFedBackAsError(): void
     {
-        // Malformed tool arguments must not silently degrade to an empty
-        // input and reach the client as an executable call
+        // Malformed arguments never reach the client as an executable call; the
+        // LLM gets an error result and the turn continues like a server turn
         $this->llmClient->setEventSequences([
             [
                 new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'ui_update']),
@@ -234,11 +233,75 @@ final class StreamingAgentClientToolTest extends TestCase
                 new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
                 new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
             ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Retrying.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
         ]);
 
-        $this->expectException(JsonException::class);
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Update the title'));
 
-        iterator_to_array($this->agent->runStream('Update the title'));
+        $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
+        $this->assertSame([
+            AgentEvent::TOOL_START,
+            AgentEvent::TOOL_RESULT,
+            AgentEvent::TEXT_DELTA,
+            AgentEvent::COMPLETED,
+        ], $types);
+
+        $messages = $this->llmClient->calls[1]['messages'];
+        $toolResult = $messages[2]->content[0];
+        $this->assertSame('call_1', $toolResult['tool_use_id']);
+        $this->assertTrue($toolResult['is_error']);
+        $this->assertSame('400: Malformed tool arguments (Syntax error): {"field": "title", ', $toolResult['content']);
+        $this->assertEquals([
+            ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'ui_update', 'input' => (object) []],
+        ], $messages[1]->content);
+    }
+
+    public function testMalformedClientCallIsHeldWhileAnotherClientCallAwaits(): void
+    {
+        $clientInput = json_encode(['field' => 'title', 'value' => 'T']);
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_bad', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '[1, 2]']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_ok', 'name' => 'ui_update']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => $clientInput]),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'tool_use']),
+            ],
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Done.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'end_turn']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Update the title'));
+
+        $types = array_map(static fn (AgentEvent $e): string => $e->type, $events);
+        $this->assertSame([
+            AgentEvent::TOOL_START,
+            AgentEvent::TOOL_START,
+            AgentEvent::TOOL_RESULT,
+            AgentEvent::CLIENT_TOOL_CALL,
+        ], $types);
+        $this->assertSame('call_ok', $events[3]->data['toolId']);
+
+        // The held error result is not awaited from the client and is merged on resume
+        iterator_to_array($this->agent->resumeStream([ToolResult::success('call_ok', 'applied')]));
+
+        $messages = $this->llmClient->calls[1]['messages'];
+        $toolResultMessage = $messages[count($messages) - 1];
+        $this->assertCount(2, $toolResultMessage->content);
+        $this->assertSame('call_bad', $toolResultMessage->content[0]['tool_use_id']);
+        $this->assertTrue($toolResultMessage->content[0]['is_error']);
+        $this->assertSame('call_ok', $toolResultMessage->content[1]['tool_use_id']);
     }
 
     public function testClientToolCallWithoutInputDeltaUsesEmptyArguments(): void

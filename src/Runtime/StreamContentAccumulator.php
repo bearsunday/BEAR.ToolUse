@@ -8,12 +8,7 @@ use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Types;
 use JsonException;
 
-use function array_is_list;
-use function is_array;
 use function is_string;
-use function json_decode;
-
-use const JSON_THROW_ON_ERROR;
 
 /**
  * Accumulates stream events into content blocks and iteration state
@@ -195,16 +190,17 @@ final class StreamContentAccumulator
         }
 
         if ($this->currentToolName !== '') {
-            $this->pendingToolCalls[] = new PendingToolCall(
+            $pending = new PendingToolCall(
                 $this->currentToolId,
                 $this->currentToolName,
                 $this->currentToolInputJson,
             );
+            $this->pendingToolCalls[] = $pending;
             $this->contentBlocks[] = [
                 'type' => 'tool_use',
-                'id' => $this->currentToolId,
-                'name' => $this->currentToolName,
-                'input' => $this->decodeToolInput(),
+                'id' => $pending->id,
+                'name' => $pending->name,
+                'input' => $this->historyInput($pending),
             ];
 
             return;
@@ -218,35 +214,25 @@ final class StreamContentAccumulator
     }
 
     /**
-     * Decode the tool input for the assistant message kept in history
+     * The tool input for the assistant message kept in history
      *
      * The API requires an object for tool_use.input, and a PHP empty array
      * encodes as [] rather than {}. Empty, malformed, or non-object input is
      * therefore recorded as an empty object. It is not executed as such:
-     * StreamingAgent decodes the raw JSON again when dispatching and pairs
-     * this block with an error result that carries the raw text, so the model
-     * sees what it actually emitted.
+     * StreamingAgent decodes the pending call again when dispatching and
+     * pairs this block with an error result that carries the raw text, so
+     * the model sees what it actually emitted.
      *
      * @return array<string, mixed>|object
      */
-    private function decodeToolInput(): array|object
+    private function historyInput(PendingToolCall $pending): array|object
     {
-        if ($this->currentToolInputJson === '') {
-            return (object) [];
-        }
-
         try {
-            /** @var mixed $input */
-            $input = json_decode($this->currentToolInputJson, true, 512, JSON_THROW_ON_ERROR);
+            $input = $pending->input();
         } catch (JsonException) {
             return (object) [];
         }
 
-        if (! is_array($input) || ($input !== [] && array_is_list($input))) {
-            return (object) [];
-        }
-
-        /** @var array<string, mixed> $input */
         return $input === [] ? (object) [] : $input;
     }
 

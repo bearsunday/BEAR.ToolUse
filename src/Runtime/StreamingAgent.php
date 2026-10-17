@@ -15,12 +15,7 @@ use JsonException;
 use Override;
 use Throwable;
 
-use function array_is_list;
-use function is_array;
-use function json_decode;
 use function sprintf;
-
-use const JSON_THROW_ON_ERROR;
 
 /**
  * Streaming agent runtime
@@ -164,9 +159,6 @@ final class StreamingAgent implements StreamingAgentInterface
      * Dispatch server tools, then hand remaining client tool calls to the consumer
      *
      * @return Generator<int, AgentEvent, mixed, bool> True when the run ends awaiting client execution
-     *
-     * @throws JsonException When the LLM produced malformed JSON for a client tool call —
-     * the input would otherwise silently degrade to an empty array and be executed as such.
      */
     private function processToolUseTurn(StreamIterationState $state): Generator
     {
@@ -189,10 +181,23 @@ final class StreamingAgent implements StreamingAgentInterface
             $toolResults = $dispatchGen->getReturn();
         }
 
-        if ($clientCalls !== []) {
+        // A client call with malformed arguments is answered here like a server
+        // call; only the decodable ones are handed to the client
+        $awaiting = [];
+        foreach ($clientCalls as $pending) {
+            try {
+                $awaiting[] = [$pending, $pending->input()];
+            } catch (JsonException $e) {
+                $toolResults[] = $this->malformedInputResult($pending, $e);
+
+                yield AgentEvent::toolResult($pending->name);
+            }
+        }
+
+        if ($awaiting !== []) {
             $this->pendingToolResults = $toolResults;
-            foreach ($clientCalls as $pending) {
-                yield AgentEvent::clientToolCall($pending->name, $pending->id, $this->decodeInput($pending));
+            foreach ($awaiting as [$pending, $input]) {
+                yield AgentEvent::clientToolCall($pending->name, $pending->id, $input);
             }
 
             return true;
@@ -267,15 +272,9 @@ final class StreamingAgent implements StreamingAgentInterface
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
             try {
-                $input = $this->decodeInput($pending);
+                $input = $pending->input();
             } catch (JsonException $e) {
-                // Fed back as an error result so the LLM can re-issue the call;
-                // the tool is never dispatched with degraded (empty) arguments
-                $toolResults[] = ToolResult::error($pending->id, sprintf(
-                    '400: Malformed tool arguments (%s): %s',
-                    $e->getMessage(),
-                    $pending->inputJson,
-                ));
+                $toolResults[] = $this->malformedInputResult($pending, $e);
 
                 yield AgentEvent::toolResult($pending->name);
 
@@ -322,25 +321,17 @@ final class StreamingAgent implements StreamingAgentInterface
     }
 
     /**
-     * @return array<string, mixed>
+     * Error result fed back to the LLM so it can re-issue the call
      *
-     * @throws JsonException When the LLM produced malformed JSON, or JSON that is
-     * not an object, for the tool call — the input would otherwise silently
-     * degrade to an empty array and be executed as such.
+     * The tool is never run with degraded (empty) arguments; the raw text is
+     * echoed so the model sees what it actually emitted.
      */
-    private function decodeInput(PendingToolCall $pending): array
+    private function malformedInputResult(PendingToolCall $pending, JsonException $e): ToolResult
     {
-        if ($pending->inputJson === '') {
-            return [];
-        }
-
-        /** @var mixed $input */
-        $input = json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
-        if (! is_array($input) || ($input !== [] && array_is_list($input))) {
-            throw new JsonException('Tool arguments must be a JSON object');
-        }
-
-        /** @var array<string, mixed> $input */
-        return $input;
+        return ToolResult::error($pending->id, sprintf(
+            '400: Malformed tool arguments (%s): %s',
+            $e->getMessage(),
+            $pending->inputJson,
+        ));
     }
 }

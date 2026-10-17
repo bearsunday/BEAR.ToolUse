@@ -27,7 +27,8 @@ use function sprintf;
  * turn. A trailing assistant message with server tool_use blocks that have
  * no held results is rejected — when resuming a mixed turn statelessly,
  * rebuild the trailing assistant message with the client tool_use blocks
- * only.
+ * only. A client call already answered server-side (malformed arguments)
+ * is held the same way and is not awaited from the client.
  *
  * This is a fail-fast correctness check, not a trust boundary: a consumer
  * that accepts conversation history from a client must authenticate the
@@ -119,7 +120,7 @@ final readonly class ResumeValidator
         }
 
         foreach ($heldResults as $held) {
-            unset($server[$held->toolUseId]);
+            unset($client[$held->toolUseId], $server[$held->toolUseId]);
         }
 
         return [$client, $server];
