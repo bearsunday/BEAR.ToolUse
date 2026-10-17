@@ -101,19 +101,21 @@ final readonly class ResumeValidator
         array $heldResults,
     ): void {
         [$awaited, $unresolvedServer] = self::awaitedIds($messages, $toolList, $heldResults);
-        if ($awaited !== []) {
-            throw new InvalidResumeException(sprintf(
-                'Client tool calls [%s] are awaiting results. Call resume() or resumeStream() with their results,'
-                . ' or reset() to start a new conversation',
-                implode(', ', array_keys($awaited)),
-            ));
-        }
-
+        // Checked first: a turn missing a server result cannot be resumed even
+        // when client calls are awaiting too, so advising resume() would mislead
         if ($unresolvedServer !== []) {
             throw new InvalidResumeException(sprintf(
                 'Server tool calls [%s] have no results. The turn did not finish;'
                 . ' call reset() before starting a new conversation',
                 implode(', ', array_keys($unresolvedServer)),
+            ));
+        }
+
+        if ($awaited !== []) {
+            throw new InvalidResumeException(sprintf(
+                'Client tool calls [%s] are awaiting results. Call resume() or resumeStream() with their results,'
+                . ' or reset() to start a new conversation',
+                implode(', ', array_keys($awaited)),
             ));
         }
     }

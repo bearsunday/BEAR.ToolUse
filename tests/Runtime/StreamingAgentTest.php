@@ -467,7 +467,8 @@ final class StreamingAgentTest extends TestCase
 
     public function testAbandonedRunStreamDoesNotAppendUserMessage(): void
     {
-        $stream = $this->agent->runStream('Abandoned');
+        // The generator is created but never iterated
+        $this->agent->runStream('Abandoned');
         self::assertCount(0, $this->agent->messages);
 
         $this->llmClient->setEventSequences([

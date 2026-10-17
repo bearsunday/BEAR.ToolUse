@@ -78,6 +78,8 @@ final class StreamingAgent implements StreamingAgentInterface
     /** @return Generator<int, AgentEvent, mixed, void> */
     private function stream(string $userMessage): Generator
     {
+        // Re-checked at first iteration: the conversation may have moved on
+        // between runStream() and here, e.g. another generator was driven first
         ResumeValidator::assertNoToolCallsAwaitingResults(
             $this->messages,
             $this->toolList,
