@@ -692,6 +692,8 @@ Errors detected by the Dispatcher:
 | Status code | `$this->code = 400` | `400: {"error":"Validation failed"}` |
 | Unknown tool | Tool not registered | `Unknown tool: foo_bar` |
 
+`StreamingAgent` adds one more case before dispatch: when the LLM streams malformed JSON as the arguments of a server tool, the tool is not invoked with empty arguments. The LLM receives `400: Malformed tool arguments (Syntax error): <raw text>` as an error result and can re-issue the call.
+
 ## API
 
 ### Interfaces

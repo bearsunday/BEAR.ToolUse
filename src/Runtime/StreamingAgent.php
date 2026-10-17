@@ -16,6 +16,7 @@ use Override;
 use Throwable;
 
 use function json_decode;
+use function sprintf;
 
 use const JSON_THROW_ON_ERROR;
 
@@ -189,10 +190,7 @@ final class StreamingAgent implements StreamingAgentInterface
         if ($clientCalls !== []) {
             $this->pendingToolResults = $toolResults;
             foreach ($clientCalls as $pending) {
-                /** @var array<string, mixed> $input */
-                $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
-
-                yield AgentEvent::clientToolCall($pending->name, $pending->id, $input);
+                yield AgentEvent::clientToolCall($pending->name, $pending->id, $this->decodeInput($pending));
             }
 
             return true;
@@ -266,8 +264,22 @@ final class StreamingAgent implements StreamingAgentInterface
     {
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
-            /** @var array<string, mixed> $input */
-            $input = (array) json_decode($pending->inputJson, true);
+            try {
+                $input = $this->decodeInput($pending);
+            } catch (JsonException $e) {
+                // Fed back as an error result so the LLM can re-issue the call;
+                // the tool is never dispatched with degraded (empty) arguments
+                $toolResults[] = ToolResult::error($pending->id, sprintf(
+                    '400: Malformed tool arguments (%s): %s',
+                    $e->getMessage(),
+                    $pending->inputJson,
+                ));
+
+                yield AgentEvent::toolResult($pending->name);
+
+                continue;
+            }
+
             $toolCall = new ToolCall(
                 id: $pending->id,
                 name: $pending->name,
@@ -305,5 +317,19 @@ final class StreamingAgent implements StreamingAgentInterface
         }
 
         return $toolResults;
+    }
+
+    /**
+     * @return array<string, mixed>
+     *
+     * @throws JsonException When the LLM produced malformed JSON for the tool call —
+     * the input would otherwise silently degrade to an empty array and be executed as such.
+     */
+    private function decodeInput(PendingToolCall $pending): array
+    {
+        /** @var array<string, mixed> $input */
+        $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+
+        return $input;
     }
 }

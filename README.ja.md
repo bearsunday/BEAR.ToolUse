@@ -691,6 +691,8 @@ Dispatcherが検出するエラー:
 | ステータスコード | `$this->code = 400` | `400: {"error":"Validation failed"}` |
 | 未知のツール | 未登録のツール | `Unknown tool: foo_bar` |
 
+`StreamingAgent` はディスパッチ前にもう1つのケースを扱います。LLMがサーバーツールの引数として壊れたJSONをストリームした場合、ツールを空の引数で呼び出すことはしません。LLMにはエラー結果として `400: Malformed tool arguments (Syntax error): <元のテキスト>` が返り、呼び出しを作り直せます。
+
 ## API
 
 ### インターフェイス

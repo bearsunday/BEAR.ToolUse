@@ -6,9 +6,12 @@ namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Types;
+use JsonException;
 
 use function is_string;
 use function json_decode;
+
+use const JSON_THROW_ON_ERROR;
 
 /**
  * Accumulates stream events into content blocks and iteration state
@@ -195,13 +198,11 @@ final class StreamContentAccumulator
                 $this->currentToolName,
                 $this->currentToolInputJson,
             );
-            /** @var array<string, mixed> $input */
-            $input = (array) json_decode($this->currentToolInputJson, true);
             $this->contentBlocks[] = [
                 'type' => 'tool_use',
                 'id' => $this->currentToolId,
                 'name' => $this->currentToolName,
-                'input' => $input,
+                'input' => $this->decodeToolInput(),
             ];
 
             return;
@@ -212,6 +213,28 @@ final class StreamContentAccumulator
         }
 
         $this->contentBlocks[] = ['type' => 'text', 'text' => $this->blockText];
+    }
+
+    /**
+     * Decode the tool input for the assistant message kept in history
+     *
+     * The API requires an object here, so malformed JSON is recorded as an
+     * empty input. It is not executed as such: StreamingAgent decodes the raw
+     * JSON again when dispatching and pairs this block with an error result
+     * that carries the raw text, so the model sees what it actually emitted.
+     *
+     * @return array<string, mixed>
+     */
+    private function decodeToolInput(): array
+    {
+        try {
+            /** @var array<string, mixed> $input */
+            $input = (array) json_decode($this->currentToolInputJson, true, 512, JSON_THROW_ON_ERROR);
+
+            return $input;
+        } catch (JsonException) {
+            return [];
+        }
     }
 
     private function eventString(StreamEvent $event, string $key, string $default = ''): string
