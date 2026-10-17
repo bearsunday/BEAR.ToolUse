@@ -6,9 +6,9 @@ namespace BEAR\ToolUse\Runtime;
 
 use BEAR\ToolUse\Llm\StreamEvent;
 use BEAR\ToolUse\Types;
+use JsonException;
 
 use function is_string;
-use function json_decode;
 
 /**
  * Accumulates stream events into content blocks and iteration state
@@ -190,18 +190,17 @@ final class StreamContentAccumulator
         }
 
         if ($this->currentToolName !== '') {
-            $this->pendingToolCalls[] = new PendingToolCall(
+            $pending = new PendingToolCall(
                 $this->currentToolId,
                 $this->currentToolName,
                 $this->currentToolInputJson,
             );
-            /** @var array<string, mixed> $input */
-            $input = (array) json_decode($this->currentToolInputJson, true);
+            $this->pendingToolCalls[] = $pending;
             $this->contentBlocks[] = [
                 'type' => 'tool_use',
-                'id' => $this->currentToolId,
-                'name' => $this->currentToolName,
-                'input' => $input,
+                'id' => $pending->id,
+                'name' => $pending->name,
+                'input' => $this->historyInput($pending),
             ];
 
             return;
@@ -212,6 +211,29 @@ final class StreamContentAccumulator
         }
 
         $this->contentBlocks[] = ['type' => 'text', 'text' => $this->blockText];
+    }
+
+    /**
+     * The tool input for the assistant message kept in history
+     *
+     * The API requires an object for tool_use.input, and a PHP empty array
+     * encodes as [] rather than {}. Empty, malformed, or non-object input is
+     * therefore recorded as an empty object. It is not executed as such:
+     * StreamingAgent decodes the pending call again when dispatching and
+     * pairs this block with an error result that carries the raw text, so
+     * the model sees what it actually emitted.
+     *
+     * @return array<string, mixed>|object
+     */
+    private function historyInput(PendingToolCall $pending): array|object
+    {
+        try {
+            $input = $pending->input();
+        } catch (JsonException) {
+            return (object) [];
+        }
+
+        return $input === [] ? (object) [] : $input;
     }
 
     private function eventString(StreamEvent $event, string $key, string $default = ''): string

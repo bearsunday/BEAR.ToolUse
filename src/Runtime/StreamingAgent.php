@@ -15,9 +15,7 @@ use JsonException;
 use Override;
 use Throwable;
 
-use function json_decode;
-
-use const JSON_THROW_ON_ERROR;
+use function sprintf;
 
 /**
  * Streaming agent runtime
@@ -161,9 +159,6 @@ final class StreamingAgent implements StreamingAgentInterface
      * Dispatch server tools, then hand remaining client tool calls to the consumer
      *
      * @return Generator<int, AgentEvent, mixed, bool> True when the run ends awaiting client execution
-     *
-     * @throws JsonException When the LLM produced malformed JSON for a client tool call —
-     * the input would otherwise silently degrade to an empty array and be executed as such.
      */
     private function processToolUseTurn(StreamIterationState $state): Generator
     {
@@ -186,12 +181,22 @@ final class StreamingAgent implements StreamingAgentInterface
             $toolResults = $dispatchGen->getReturn();
         }
 
-        if ($clientCalls !== []) {
-            $this->pendingToolResults = $toolResults;
-            foreach ($clientCalls as $pending) {
-                /** @var array<string, mixed> $input */
-                $input = (array) json_decode($pending->inputJson, true, 512, JSON_THROW_ON_ERROR);
+        // A client call with malformed arguments is answered here like a server
+        // call; only the decodable ones are handed to the client
+        $awaiting = [];
+        foreach ($clientCalls as $pending) {
+            try {
+                $awaiting[] = [$pending, $pending->input()];
+            } catch (JsonException $e) {
+                $toolResults[] = $this->malformedInputResult($pending, $e);
 
+                yield AgentEvent::toolResult($pending->name);
+            }
+        }
+
+        if ($awaiting !== []) {
+            $this->pendingToolResults = $toolResults;
+            foreach ($awaiting as [$pending, $input]) {
                 yield AgentEvent::clientToolCall($pending->name, $pending->id, $input);
             }
 
@@ -266,8 +271,16 @@ final class StreamingAgent implements StreamingAgentInterface
     {
         $toolResults = [];
         foreach ($pendingToolCalls as $pending) {
-            /** @var array<string, mixed> $input */
-            $input = (array) json_decode($pending->inputJson, true);
+            try {
+                $input = $pending->input();
+            } catch (JsonException $e) {
+                $toolResults[] = $this->malformedInputResult($pending, $e);
+
+                yield AgentEvent::toolResult($pending->name);
+
+                continue;
+            }
+
             $toolCall = new ToolCall(
                 id: $pending->id,
                 name: $pending->name,
@@ -305,5 +318,20 @@ final class StreamingAgent implements StreamingAgentInterface
         }
 
         return $toolResults;
+    }
+
+    /**
+     * Error result fed back to the LLM so it can re-issue the call
+     *
+     * The tool is never run with degraded (empty) arguments; the raw text is
+     * echoed so the model sees what it actually emitted.
+     */
+    private function malformedInputResult(PendingToolCall $pending, JsonException $e): ToolResult
+    {
+        return ToolResult::error($pending->id, sprintf(
+            '400: Malformed tool arguments (%s): %s',
+            $e->getMessage(),
+            $pending->inputJson,
+        ));
     }
 }
