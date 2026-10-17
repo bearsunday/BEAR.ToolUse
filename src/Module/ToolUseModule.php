@@ -8,6 +8,8 @@ use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\DispatcherInterface;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
 use BEAR\ToolUse\Dispatch\ToolCallObserverInterface;
+use BEAR\ToolUse\Dispatch\ToolErrorFormatter;
+use BEAR\ToolUse\Dispatch\ToolErrorFormatterInterface;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolRegistryInterface;
 use BEAR\ToolUse\Schema\JsonSchemaRepository;
@@ -58,6 +60,9 @@ final class ToolUseModule extends AbstractModule
 
         // Tool Call Observer (default no-op; users can override with their own implementation)
         $this->bind(ToolCallObserverInterface::class)->to(NullToolCallObserver::class);
+
+        // Tool Error Formatter (default hides server errors from the LLM; bind DebugToolErrorFormatter to disclose them)
+        $this->bind(ToolErrorFormatterInterface::class)->to(ToolErrorFormatter::class);
 
         // Dispatcher
         $this->bind(DispatcherInterface::class)->to(Dispatcher::class);

@@ -8,6 +8,7 @@ use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolErrorFormatter;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Fake\FakeStreamingLlmClient;
 use BEAR\ToolUse\Fake\FakeThrowingDispatcher;
@@ -41,7 +42,7 @@ final class StreamingAgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('article_get', 'article', 'get');
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $tools = [
             new Tool('article_get', 'Get an article', [
@@ -369,8 +370,57 @@ final class StreamingAgentTest extends TestCase
         $events = iterator_to_array($this->agent->runStream('Hi'));
 
         $lastEvent = end($events);
-        self::assertSame(AgentEvent::COMPLETED, $lastEvent->type);
+        self::assertSame(AgentEvent::INCOMPLETE, $lastEvent->type);
+        self::assertSame('max_tokens', $lastEvent->data['stopReason']);
         self::assertSame('Partial', $lastEvent->data['fullText']);
+        // The partial assistant text is kept in history, as the sync agent does
+        self::assertCount(2, $this->agent->messages);
+        self::assertSame('assistant', $this->agent->messages[1]->role);
+    }
+
+    public function testIncompleteTurnDropsToolUseBlock(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'Partial']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::TOOL_USE_START, ['id' => 'call_1', 'name' => 'article_get']),
+                new StreamEvent(StreamEvent::TOOL_USE_DELTA, ['input' => '{"id":1}']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'max_tokens']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Get article 1'));
+
+        $lastEvent = end($events);
+        self::assertSame(AgentEvent::INCOMPLETE, $lastEvent->type);
+        // The tool was not dispatched, so only the text is kept
+        self::assertCount(2, $this->agent->messages);
+        self::assertSame([['type' => 'text', 'text' => 'Partial']], $this->agent->messages[1]->content);
+    }
+
+    public function testUnknownStopReasonIsIncomplete(): void
+    {
+        $this->llmClient->setEventSequences([
+            [
+                new StreamEvent(StreamEvent::TEXT_DELTA, ['text' => 'I cannot help with that.']),
+                new StreamEvent(StreamEvent::CONTENT_BLOCK_STOP),
+                new StreamEvent(StreamEvent::MESSAGE_STOP, ['stopReason' => 'refusal']),
+            ],
+        ]);
+
+        /** @var list<AgentEvent> $events */
+        $events = iterator_to_array($this->agent->runStream('Hi'));
+
+        $lastEvent = end($events);
+        self::assertSame(AgentEvent::INCOMPLETE, $lastEvent->type);
+        self::assertSame('refusal', $lastEvent->data['stopReason']);
+        self::assertSame(
+            ['type' => 'incomplete', 'stopReason' => 'refusal', 'fullText' => 'I cannot help with that.'],
+            $lastEvent->jsonSerialize(),
+        );
     }
 
     public function testToolDispatchException(): void
@@ -461,8 +511,10 @@ final class StreamingAgentTest extends TestCase
         /** @var list<AgentEvent> $events */
         $events = iterator_to_array($this->agent->runStream('Hi'));
 
+        // The model meant to call a tool but none came through: not a finished turn
         $lastEvent = end($events);
-        self::assertSame(AgentEvent::COMPLETED, $lastEvent->type);
+        self::assertSame(AgentEvent::INCOMPLETE, $lastEvent->type);
+        self::assertSame('tool_use', $lastEvent->data['stopReason']);
     }
 
     public function testConversationHistoryPreserved(): void

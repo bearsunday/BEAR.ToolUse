@@ -16,6 +16,7 @@ final readonly class AgentEvent implements JsonSerializable
     public const TOOL_START = 'tool_start';
     public const TOOL_RESULT = 'tool_result';
     public const COMPLETED = 'completed';
+    public const INCOMPLETE = 'incomplete';
     public const CONFIRMATION_REQUIRED = 'confirmation_required';
     public const CLIENT_TOOL_CALL = 'client_tool_call';
     public const ERROR = 'error';
@@ -45,6 +46,12 @@ final readonly class AgentEvent implements JsonSerializable
     public static function completed(string $fullText): self
     {
         return new self(self::COMPLETED, ['fullText' => $fullText]);
+    }
+
+    /** The turn stopped before finishing; $stopReason is the LLM client's value verbatim */
+    public static function incomplete(string $stopReason, string $fullText): self
+    {
+        return new self(self::INCOMPLETE, ['stopReason' => $stopReason, 'fullText' => $fullText]);
     }
 
     /** @param array<string, mixed> $input */

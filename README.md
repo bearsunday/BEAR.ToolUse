@@ -131,12 +131,15 @@ $response = $agent->run('Please get user information for ID 123');
 
 if ($response->completed) {
     echo $response->getText();
+} else {
+    // max_tokens, stop_sequence, refusal, ... — the turn did not finish
+    error_log("stopped: {$response->stopReason}");
 }
 ```
 
 ### 5. Conversation History
 
-The agent maintains conversation history across multiple `run()` calls.
+The agent maintains conversation history across multiple `run()` calls. An incomplete turn keeps its partial content, except `tool_use` blocks: they were never dispatched, and replaying one without a matching `tool_result` is rejected by the API.
 
 ```php
 // Continue conversation
@@ -183,6 +186,7 @@ while ($gen->valid()) {
         'tool_result'           => sendSseEvent('status', "{$event->data['toolName']} done"),
         'confirmation_required' => sendSseEvent('confirm', json_encode($event)),
         'completed'             => sendSseEvent('done', $event->data['fullText']),
+        'incomplete'            => sendSseEvent('stopped', $event->data['stopReason']),
         'error'                 => sendSseEvent('error', $event->data['message']),
     };
     // For confirmation events, send user's response via Generator::send()
@@ -538,6 +542,7 @@ final readonly class AuditLogObserver implements ToolCallObserverInterface
             'name' => $toolCall->name,
             'input' => $toolCall->input,
             'isError' => $result->isError,
+            'exception' => $result->throwable?->getMessage(),
             'durationMs' => $durationMs,
         ]);
     }
@@ -545,6 +550,8 @@ final readonly class AuditLogObserver implements ToolCallObserverInterface
 ```
 
 > **Note:** `$toolCall->input` and `$result->content` may contain sensitive values (PII, credentials, API tokens) depending on the underlying resource. Sanitize or redact such fields before writing to persistent logs, traces, or external systems.
+
+`$result->throwable` carries the exception behind an error result. It never reaches the LLM — see [Error Feedback Loop](#error-feedback-loop) — so the observer is where the cause gets recorded.
 
 ### Bind in DI Module
 
@@ -684,13 +691,23 @@ LLM receives error, decides next action
 LLM: "User 999 was not found."
 ```
 
-Errors detected by the Dispatcher:
+The LLM reads error text like any other client, and may quote it to the user. The default `ToolErrorFormatter` follows the HTTP convention: a client error (4xx) was written for the caller and is passed on so the LLM can correct its call; anything else is reported as a failure without its details.
 
-| Error Type | Example | Error Message Format |
-|------------|---------|---------------------|
-| Exception | `ResourceNotFoundException` | `BEAR\Resource\Exception\ResourceNotFoundException: /user?id=999` |
-| Status code | `$this->code = 400` | `400: {"error":"Validation failed"}` |
+| Error Type | Example | What the LLM receives |
+|------------|---------|-----------------------|
+| 4xx status | `$this->code = 400` | `400: {"error":"Validation failed"}` |
+| 5xx status | `$this->code = 500` | `500: Tool execution failed.` |
+| Exception with a 4xx code | `ResourceNotFoundException` | `404: /user?id=999` |
+| Any other exception | `PDOException` | `Tool execution failed.` |
 | Unknown tool | Tool not registered | `Unknown tool: foo_bar` |
+
+The exception itself is kept on `ToolResult::$throwable` for the [observer](#observing-tool-calls). To see the raw failure during development, bind `DebugToolErrorFormatter`, which discloses the exception class and message and every status body:
+
+```php
+$this->bind(ToolErrorFormatterInterface::class)->to(DebugToolErrorFormatter::class);
+```
+
+Implement `ToolErrorFormatterInterface` for anything in between, such as mapping domain exceptions to messages of your own.
 
 ## API
 
@@ -709,6 +726,7 @@ Errors detected by the Dispatcher:
 | `ToolResultFilterInterface` | Response filter before sending to LLM |
 | `ConfirmationHandlerInterface` | User confirmation for destructive tools |
 | `ToolCallObserverInterface` | Hook invoked once per tool dispatch (audit, metrics, latency) |
+| `ToolErrorFormatterInterface` | Error text the LLM receives for a failed tool |
 
 ### Main Classes
 
@@ -723,6 +741,7 @@ Errors detected by the Dispatcher:
 | `Tool` | Tool definition (JSON Schema) |
 | `ToolCall` | Tool call from LLM |
 | `ToolResult` | Tool execution result |
+| `ToolErrorFormatter` | Default formatter: 4xx disclosed, everything else hidden (`DebugToolErrorFormatter` discloses all) |
 | `Message` | Conversation message |
 | `LlmResponse` | Response from LLM |
 

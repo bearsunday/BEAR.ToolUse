@@ -11,6 +11,7 @@ use BEAR\ToolUse\Fake\FakeToolCallObserver;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
+use RuntimeException;
 
 #[CoversClass(Dispatcher::class)]
 #[CoversClass(ToolCall::class)]
@@ -20,15 +21,16 @@ final class DispatcherTest extends TestCase
     private Dispatcher $dispatcher;
     private ToolRegistry $registry;
     private FakeToolCallObserver $observer;
+    private ResourceInterface $resource;
 
     protected function setUp(): void
     {
         $injector = new Injector(new ResourceModule('BEAR\ToolUse\Fake'));
-        $resource = $injector->getInstance(ResourceInterface::class);
+        $this->resource = $injector->getInstance(ResourceInterface::class);
 
         $this->registry = new ToolRegistry();
         $this->observer = new FakeToolCallObserver();
-        $this->dispatcher = new Dispatcher($resource, $this->registry, $this->observer);
+        $this->dispatcher = new Dispatcher($this->resource, $this->registry, $this->observer, new ToolErrorFormatter());
     }
 
     public function testDispatchUnknownTool(): void
@@ -116,9 +118,23 @@ final class DispatcherTest extends TestCase
 
         $result = $this->dispatcher->dispatch($toolCall);
 
+        // The LLM is told only that the tool failed; the cause is kept for observers
         $this->assertTrue($result->isError);
-        $this->assertStringContainsString('RuntimeException', $result->content);
-        $this->assertStringContainsString('Test error', $result->content);
+        $this->assertSame('Tool execution failed.', $result->content);
+        $this->assertInstanceOf(RuntimeException::class, $result->throwable);
+        $this->assertSame('Test error', $result->throwable->getMessage());
+    }
+
+    public function testDispatchWithExceptionAndDebugFormatter(): void
+    {
+        $dispatcher = new Dispatcher($this->resource, $this->registry, $this->observer, new DebugToolErrorFormatter());
+        $this->registry->register('error_get', 'app://self/error', 'get');
+        $toolCall = new ToolCall('call_error', 'error_get', []);
+
+        $result = $dispatcher->dispatch($toolCall);
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('RuntimeException: Test error', $result->content);
     }
 
     public function testToolCallFromArray(): void
@@ -162,6 +178,17 @@ final class DispatcherTest extends TestCase
         $this->assertSame('Something went wrong', $result->content);
     }
 
+    public function testToolResultErrorWithThrowable(): void
+    {
+        $e = new RuntimeException('cause');
+        $result = ToolResult::error('call_123', 'Tool execution failed.', $e);
+
+        $this->assertTrue($result->isError);
+        $this->assertSame('Tool execution failed.', $result->content);
+        $this->assertSame($e, $result->throwable);
+        $this->assertNull(ToolResult::error('call_124', 'no cause')->throwable);
+    }
+
     public function testToolResultCancelled(): void
     {
         $result = ToolResult::cancelled('call_456');
@@ -200,8 +227,10 @@ final class DispatcherTest extends TestCase
 
         $result = $this->dispatcher->dispatch($toolCall);
 
+        // A 5xx body is not written for the caller, so it is not passed on
         $this->assertTrue($result->isError);
-        $this->assertStringContainsString('500:', $result->content);
+        $this->assertSame('500: Tool execution failed.', $result->content);
+        $this->assertNull($result->throwable);
     }
 
     public function testDispatchWithSuccessStatusCode(): void
@@ -294,7 +323,7 @@ final class DispatcherTest extends TestCase
         $this->assertSame($toolCall, $call['toolCall']);
         $this->assertSame($result, $call['result']);
         $this->assertTrue($call['result']->isError);
-        $this->assertStringContainsString('RuntimeException', $call['result']->content);
+        $this->assertInstanceOf(RuntimeException::class, $call['result']->throwable);
         $this->assertGreaterThan(0.0, $call['durationMs']);
     }
 

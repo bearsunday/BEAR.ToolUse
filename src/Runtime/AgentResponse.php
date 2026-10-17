@@ -66,6 +66,20 @@ final readonly class AgentResponse
         return new self(false, self::STOP_STOP_SEQUENCE, $content, $messages);
     }
 
+    /**
+     * Stopped for a reason the loop does not handle itself
+     *
+     * $stopReason is the LLM client's value verbatim (for example `refusal` or
+     * `pause_turn`). The turn did not finish, so the caller decides whether to
+     * show the content, retry, or continue.
+     *
+     * @param list<Message> $messages
+     */
+    public static function stopped(string $stopReason, mixed $content, array $messages): self
+    {
+        return new self(false, $stopReason, $content, $messages);
+    }
+
     public function getText(): string
     {
         if (! is_array($this->content)) {

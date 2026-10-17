@@ -8,6 +8,8 @@ use BEAR\Resource\Module\ResourceModule;
 use BEAR\Resource\ResourceInterface;
 use BEAR\ToolUse\Dispatch\Dispatcher;
 use BEAR\ToolUse\Dispatch\NullToolCallObserver;
+use BEAR\ToolUse\Dispatch\ToolCall;
+use BEAR\ToolUse\Dispatch\ToolErrorFormatter;
 use BEAR\ToolUse\Dispatch\ToolRegistry;
 use BEAR\ToolUse\Dispatch\ToolResult;
 use BEAR\ToolUse\Fake\FakeLlmClient;
@@ -33,7 +35,7 @@ final class AgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('article_get', 'article', 'get');
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $tools = [
             new Tool('article_get', 'Get an article', [
@@ -97,17 +99,55 @@ final class AgentTest extends TestCase
         $this->assertSame(AgentResponse::STOP_STOP_SEQUENCE, $response->stopReason);
     }
 
-    public function testUnknownStopReasonTreatedAsCompleted(): void
+    public function testUnknownStopReasonIsNotCompleted(): void
     {
         $this->llmClient->queueResponse(new LlmResponse(
-            stopReason: 'unknown_reason',
-            content: [['type' => 'text', 'text' => 'Unknown stop']],
+            stopReason: 'refusal',
+            content: [['type' => 'text', 'text' => 'I cannot help with that.']],
             toolCalls: [],
         ));
 
         $response = $this->agent->run('Test unknown stop reason');
 
-        $this->assertTrue($response->completed);
+        $this->assertFalse($response->completed);
+        $this->assertSame('refusal', $response->stopReason);
+        $this->assertSame('I cannot help with that.', $response->getText());
+        // user message + the assistant content that came with the stop
+        $this->assertCount(2, $response->messages);
+        $this->assertSame('assistant', $response->messages[1]->role);
+    }
+
+    public function testIncompleteTurnDropsToolUseBlock(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'max_tokens',
+            content: [
+                ['type' => 'text', 'text' => 'Partial'],
+                ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'article_get', 'input' => ['id' => 1]],
+            ],
+            toolCalls: [new ToolCall('call_1', 'article_get', ['id' => 1])],
+        ));
+
+        $response = $this->agent->run('Get article 1');
+
+        $this->assertFalse($response->completed);
+        // The tool_use block was never dispatched, so it is not kept in history
+        $this->assertCount(2, $this->agent->messages);
+        $this->assertSame([['type' => 'text', 'text' => 'Partial']], $this->agent->messages[1]->content);
+    }
+
+    public function testUnknownStopReasonWithEmptyContentDoesNotAppendMessage(): void
+    {
+        $this->llmClient->queueResponse(new LlmResponse(
+            stopReason: 'refusal',
+            content: [],
+            toolCalls: [],
+        ));
+
+        $response = $this->agent->run('Test empty refusal');
+
+        $this->assertFalse($response->completed);
+        $this->assertCount(1, $this->agent->messages);
     }
 
     public function testToolUseWithSuccessfulDispatch(): void
@@ -288,7 +328,7 @@ final class AgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('error_get', 'app://self/error', 'get');
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $tools = [
             new Tool('error_get', 'Get error resource', [
@@ -326,7 +366,8 @@ final class AgentTest extends TestCase
         $toolResultMessage = $secondCallMessages[2];
         $this->assertSame('user', $toolResultMessage->role);
         $this->assertTrue($toolResultMessage->content[0]['is_error']);
-        $this->assertStringContainsString('RuntimeException', $toolResultMessage->content[0]['content']);
+        // The LLM sees that the tool failed, not why (default ToolErrorFormatter)
+        $this->assertSame('Tool execution failed.', $toolResultMessage->content[0]['content']);
     }
 
     public function testToolErrorFeedbackLoopWithRetry(): void
@@ -337,7 +378,7 @@ final class AgentTest extends TestCase
         $registry = new ToolRegistry();
         $registry->register('error_get', 'app://self/error', 'get');
         $registry->register('article_get', 'app://self/article', 'get');
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $tools = [
             new Tool('error_get', 'Get error resource', [
@@ -395,7 +436,7 @@ final class AgentTest extends TestCase
         $resource = $injector->getInstance(ResourceInterface::class);
         $registry = new ToolRegistry();
         $registry->register('status_error_get', 'app://self/status-error', 'get');
-        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver());
+        $dispatcher = new Dispatcher($resource, $registry, new NullToolCallObserver(), new ToolErrorFormatter());
 
         $tools = [
             new Tool('status_error_get', 'Get status error resource', [

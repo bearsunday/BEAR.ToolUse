@@ -19,6 +19,9 @@ src/
 │   ├── ToolRegistryInterface.php
 │   ├── ToolRegistry.php # Tool name → resource mapping
 │   ├── ToolResultFilterInterface.php # Response filter
+│   ├── ToolErrorFormatterInterface.php # Error text the LLM receives
+│   ├── ToolErrorFormatter.php        # Default: 4xx disclosed, rest hidden
+│   ├── DebugToolErrorFormatter.php   # Development: everything disclosed
 │   ├── ToolCall.php     # Call from LLM
 │   └── ToolResult.php   # Execution result
 ├── Schema/              # Schema conversion
