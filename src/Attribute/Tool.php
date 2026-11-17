@@ -18,9 +18,13 @@ use BEAR\ToolUse\Dispatch\ToolResultFilterInterface;
 final class Tool
 {
     /**
-     * @param string|null $name        Read on a method only; null names the tool `<resource path>_<method>`, e.g. `user_get`
+     * @param string|null $name        Read on a method only; null names the tool `<resource path>_<method>`, e.g. `user_get`.
+     *                                 The HTTP method of the call is read back from the name: the part after
+     *                                 `<resource path>_`, else a `_get`/`_post`/`_put`/`_patch`/`_delete` suffix, else GET
      * @param string|null $description null takes the class value, then the summary of the method docblock
-     * @param bool|null   $confirm     true asks ConfirmationHandlerInterface before the call; null takes the class value, then false
+     * @param bool|null   $confirm     true marks the tool as needing confirmation: Agent asks ConfirmationHandlerInterface
+     *                                 when one is set, StreamingAgent yields a confirmationRequired event; null takes the
+     *                                 class value, then false
      */
     public function __construct(
         public string|null $name = null,
